@@ -1,1041 +1,1262 @@
+#
+# A basic Pygame 2D RPG prototype with a start menu, character movement,
+# a simple dungeon with enemies and NPCs, and life points.
+#
 import pygame
+import sys
+import numpy as np
 import random
 import math
-import numpy as np
 
-# --- Game Constants ---
+# --- Initialization ---
+pygame.init()
+pygame.mixer.init() # Initialize the sound mixer
+
+# --- Constants ---
+SCREEN_INFO = pygame.display.Info()
+SCREEN_WIDTH = SCREEN_INFO.current_w
+SCREEN_HEIGHT = SCREEN_INFO.current_h
+# Calculate TILE_SIZE dynamically to fit the screen
+TILE_SIZE = min(SCREEN_WIDTH // 20, SCREEN_HEIGHT // 14)
+PLAYER_SIZE = TILE_SIZE // 2  # New constant for smaller player size
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-RED = (255, 0, 0)
-GREEN = (0, 255, 0)
-BLUE = (0, 0, 255)
-DARK_RED = (139, 0, 0)
-YELLOW = (255, 255, 0)
-MAGENTA = (255, 0, 255) # Brighter color for the Gatling gun
-BARRIER_COLOR = WHITE # Changed to WHITE
+GREEN = (0, 200, 0)
+DARK_GREEN = (0, 150, 0)
+WALL_COLOR = (100, 100, 100)
+FLOOR_COLOR = (50, 50, 50)
+FLOOR_TILE_SIZE = TILE_SIZE // 2 # NEW: Size of the individual floor tiles
+FLOOR_COLOR_2 = (40, 40, 40) # NEW: Second color for the checkerboard pattern
+PLAYER_COLOR = (255, 0, 0)
+NPC_COLOR = (0, 0, 255)
+ENEMY_COLOR = (200, 50, 50) # Red color for enemies
+TORCH_COLOR = (255, 255, 0)
+DOOR_COLOR = (139, 69, 19) # SaddleBrown for the door
+KEY_COLOR = (255, 215, 0) # Gold for the key
+LIFE_BAR_COLOR = (0, 255, 0) # Green for life bar
+LIFE_BAR_BG_COLOR = (255, 0, 0) # Red for life bar background
+STAMINA_BAR_COLOR = (0, 191, 255) # Deep Sky Blue
+STAMINA_BAR_BG_COLOR = (25, 25, 25) # Dark gray
 
-# New colors for the floor with eight gradients
-FLOOR_GRAY_1 = (20, 20, 20)
-FLOOR_GRAY_2 = (40, 40, 40)
-FLOOR_GRAY_3 = (60, 60, 60)
-FLOOR_GRAY_4 = (80, 80, 80)
-FLOOR_GRAY_5 = (100, 100, 100)
-FLOOR_GRAY_6 = (120, 120, 120)
-FLOOR_GRAY_7 = (140, 140, 140)
-FLOOR_COLORS = [FLOOR_GRAY_1, FLOOR_GRAY_2, FLOOR_GRAY_3, FLOOR_GRAY_4, FLOOR_GRAY_5, FLOOR_GRAY_6, FLOOR_GRAY_7]
+# NEW POWER-UP COLORS
+FOG_CLEAR_COLOR = (128, 0, 128) # Purple
+ENEMY_BOMB_COLOR = (255, 255, 255) # White
+HEAL_COLOR = (0, 255, 0) # Green
 
-
-# Hexagon dimensions
-HEX_SIDE = 60
-# Recalculated based on a proper hex grid
-HEX_WIDTH = HEX_SIDE * 2
-HEX_HEIGHT = int(HEX_SIDE * math.sqrt(3))
-
-# --- Initialize Pygame ---
-pygame.init()
-pygame.mixer.init() # Initialize the mixer for sound
-# Set the game to run in fullscreen mode and get dimensions after initialization
-SCREEN_WIDTH, SCREEN_HEIGHT = pygame.display.Info().current_w, pygame.display.Info().current_h
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN)
-pygame.display.set_caption("Python Zombie Shooter")
-clock = pygame.time.Clock()
-font = pygame.font.Font(None, 36)
-large_font = pygame.font.Font(None, 72)
-
-# Global variables for top scores and audio settings
-top_scores = []
-global_volume = 0.5
-is_muted = False
-# Default keybinds, now a global dictionary
-keybinds = {
-    'move_up': pygame.K_w,
-    'move_down': pygame.K_s,
-    'move_left': pygame.K_a,
-    'move_right': pygame.K_d
+# --- Game States ---
+GAME_STATES = {
+    "MENU": 0,
+    "GAME": 1,
+    "DIALOGUE": 2,
+    "GAME_OVER": 3,
+    "OPTIONS": 4, # New state for the options menu
+    "AUDIO_OPTIONS": 5, # New state for audio options
+    "CONTROLS_OPTIONS": 6, # New state for controls options
+    "PAUSED": 7, # New state for the pause menu
+    "REBINDING_KEY": 8, # New state for key re-binding
 }
 
+# Create the display in fullscreen mode
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.FULLSCREEN)
+pygame.display.set_caption("My Story-Driven RPG")
+clock = pygame.time.Clock()
 
-# --- Sound Generation ---
-def generate_sound(frequency, duration, volume):
-    """
-    Generates a sound wave and returns a Pygame Sound object.
-    frequency: The frequency of the sine wave in Hz.
-    duration: The duration of the sound in milliseconds.
-    volume: The volume (0.0 to 1.0).
-    
-    This version has a corrected calculation for the sound's volume envelope
-    to prevent the ValueError from mismatched array sizes.
-    """
+# Set initial game state to the menu
+current_state = GAME_STATES["MENU"]
+current_level = 1
+
+# --- Text and Fonts ---
+font = pygame.font.Font(None, 74)
+small_font = pygame.font.Font(None, 40)
+dialogue_font = pygame.font.Font(None, 24)
+
+# --- Keybindings Dictionary ---
+# A dictionary to hold the current keybindings.
+# This makes it easy to change them dynamically.
+KEY_BINDINGS = {
+    "move_up": pygame.K_w,
+    "move_down": pygame.K_s,
+    "move_left": pygame.K_a,
+    "move_right": pygame.K_d,
+    "sprint": pygame.K_LSHIFT,
+    "interact": pygame.K_SPACE,
+}
+
+# Variable to track which key is being re-bound
+rebind_target = None
+
+# --- Audio Settings ---
+music_volume = 0.5  # Initial volume level (0.0 to 1.0)
+is_muted = False    # Flag to check if the game is muted
+pygame.mixer.music.set_volume(music_volume)
+
+# --- Sound Effects ---
+def generate_unlock_sound():
+    """Generates a simple 'unlock' sound effect using two short tones."""
     sample_rate = 44100
-    n_samples = int(round(duration * sample_rate / 1000))
-    
-    # Define a simple fade-in/out length (e.g., 10% of the total duration)
-    fade_len = int(n_samples * 0.1)
-    
-    # Calculate the length of the sustained (middle) portion
-    sustain_len = n_samples - (fade_len * 2)
-    
-    # Handle cases where the sound is too short for a fade
-    if sustain_len < 0:
-        fade_len = n_samples // 2
-        sustain_len = 0
-    
-    # Generate the fade-in, sustain, and fade-out arrays
-    fade_in = np.linspace(0, 1, fade_len)
-    sustain = np.ones(sustain_len)
-    fade_out = np.linspace(1, 0, n_samples - fade_len - sustain_len) # Correct length calculation
-    
-    # Concatenate them to create the full volume envelope array
-    full_arr = np.concatenate([fade_in, sustain, fade_out])
-    
-    buf = np.zeros((n_samples, 2), dtype=np.int16)
-    max_sample = 32767
-    
-    # Generate the sine wave
-    sine_wave = np.sin(2 * np.pi * np.arange(n_samples) * frequency / sample_rate)
-    
-    # Multiply the sine wave by the volume envelope
-    scaled_wave = np.array(sine_wave * max_sample * volume * full_arr, dtype=np.int16)
-    
-    for channel in range(2):
-        buf[:, channel] = scaled_wave
-    
-    sound = pygame.sndarray.make_sound(buf)
-    return sound
+    duration = 0.2  # duration in seconds
+    frequency1 = 880  # A5
+    frequency2 = 1320 # E6
 
-# Generate our sound effects internally
-shoot_sound = generate_sound(500, 50, 0.25) # The volume has been lowered from 0.375 to 0.25
-hit_sound = generate_sound(300, 100, 0.3)
-zombie_death_sound = generate_sound(150, 200, 0.6)
+    # Create time arrays for two parts of the sound
+    t1 = np.linspace(0., duration, int(sample_rate * duration / 2), False)
+    t2 = np.linspace(0., duration, int(sample_rate * duration / 2), False)
 
-# --- Classes ---
+    # Generate sine waves for each part
+    tone1 = 0.5 * np.sin(2 * np.pi * frequency1 * t1)
+    tone2 = 0.5 * np.sin(2 * np.pi * frequency2 * t2)
+
+    # Combine the tones
+    sound_data = np.concatenate((tone1, tone2))
+
+    # Scale to 16-bit integer format and convert to bytes
+    sound_data_int16 = (sound_data * 32767).astype(np.int16)
+    
+    # Create the Pygame Sound object
+    return pygame.mixer.Sound(sound_data_int16.tobytes())
+
+def generate_damage_sound():
+    """Generates a low, quick tone for taking damage."""
+    sample_rate = 44100
+    duration = 0.1
+    frequency = 100 # Low frequency for a 'thud' sound
+    t = np.linspace(0., duration, int(sample_rate * duration), False)
+    sound_data = 0.5 * np.sin(2 * np.pi * frequency * t)
+    sound_data_int16 = (sound_data * 32767).astype(np.int16)
+    return pygame.mixer.Sound(sound_data_int16.tobytes())
+
+def generate_collect_sound():
+    """Generates a high, pleasant tone for collecting items."""
+    sample_rate = 44100
+    duration = 0.1
+    frequency = 1000 # High frequency
+    t = np.linspace(0., duration, int(sample_rate * duration), False)
+    sound_data = 0.5 * np.sin(2 * np.pi * frequency * t)
+    sound_data_int16 = (sound_data * 32767).astype(np.int16)
+    return pygame.mixer.Sound(sound_data_int16.tobytes())
+    
+def generate_dialogue_sound():
+    """Generates a soft, quick 'pop' for dialogue."""
+    sample_rate = 44100
+    duration = 0.05
+    frequency = 500
+    t = np.linspace(0., duration, int(sample_rate * duration), False)
+    sound_data = 0.3 * np.sin(2 * np.pi * frequency * t) * np.exp(-t * 20) # A little decay
+    sound_data_int16 = (sound_data * 32767).astype(np.int16)
+    return pygame.mixer.Sound(sound_data_int16.tobytes())
+
+def generate_game_over_sound():
+    """Generates a long, descending tone for game over."""
+    sample_rate = 44100
+    duration = 1.5
+    t = np.linspace(0., duration, int(sample_rate * duration), False)
+    # Descending frequency from 400Hz to 100Hz
+    frequency = 400 * np.exp(-t / 0.5) + 100
+    sound_data = 0.5 * np.sin(2 * np.pi * frequency * t)
+    sound_data_int16 = (sound_data * 32767).astype(np.int16)
+    return pygame.mixer.Sound(sound_data_int16.tobytes())
+
+def generate_level_up_sound():
+    """Generates a short, ascending tone for leveling up."""
+    sample_rate = 44100
+    duration = 0.5
+    t = np.linspace(0., duration, int(sample_rate * duration), False)
+    # Ascending frequency from 200Hz to 800Hz
+    frequency = 200 * np.exp(t * 2)
+    sound_data = 0.5 * np.sin(2 * np.pi * frequency * t)
+    sound_data_int16 = (sound_data * 32767).astype(np.int16)
+    return pygame.mixer.Sound(sound_data_int16.tobytes())
+
+# Generate the sounds once at the start
+unlock_sound = generate_unlock_sound()
+damage_sound = generate_damage_sound()
+collect_sound = generate_collect_sound()
+dialogue_sound = generate_dialogue_sound()
+game_over_sound = generate_game_over_sound()
+level_up_sound = generate_level_up_sound()
+
+# --- Game Classes ---
+
 class Player(pygame.sprite.Sprite):
-    """
-    Represents the player character.
-    Handles movement, health, and shooting.
-    """
-    def __init__(self):
+    """Represents the player character."""
+    def __init__(self, x, y):
         super().__init__()
-        # Create a circular player icon
-        self.image = pygame.Surface([50, 50], pygame.SRCALPHA)
-        pygame.draw.circle(self.image, BLUE, (25, 25), 25)
-        self.rect = self.image.get_rect()
-        self.rect.center = (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2)
-        self.speed = 5
-        self.health = 100
-        self.max_health = 100
-        # New attributes for weapon upgrade
-        self.current_weapon = 'pistol' # pistol, machine_gun, gatling_gun
-        self.last_shot_time = 0
-        self.fire_rate = 500 # milliseconds between shots (for pistol)
+        self.image = pygame.Surface((PLAYER_SIZE, PLAYER_SIZE))
+        self.image.fill(PLAYER_COLOR)
+        # Center the player within the tile they spawned on
+        self.rect = self.image.get_rect(center=(x + TILE_SIZE/2, y + TILE_SIZE/2))
+        self.base_speed = 5 # Increased from 4 to 5 for slightly faster movement
+        self.sprint_speed = self.base_speed * 1.75 # Sprint speed is 1.75x base speed
+        self.has_key = False
+        self.life_points = 100
+        self.invulnerable_timer = 0
+        self.is_flashing = False
+        self.inventory = [] # New list to store collected power-ups
+        
+        # New stamina system attributes
+        self.max_stamina = 100
+        self.stamina = self.max_stamina
+        self.stamina_drain_rate = 1.5 # How much stamina is lost per frame while sprinting
+        self.stamina_recharge_rate = 1 # How much stamina is gained per frame when not sprinting
+        self.is_sprinting = False
 
-    def update(self):
+    def update(self, dx, dy, walls, doors):
         """
-        Updates player position based on key presses.
-        Now uses the global keybinds dictionary for movement.
+        Update player position with collision detection that allows sliding.
+        This function now checks for collisions with both walls and locked doors.
+        It also handles stamina drain and recharge.
         """
-        keys = pygame.key.get_pressed()
-        # Movement with WASD
-        if keys[keybinds['move_left']] and self.rect.left > 0:
-            self.rect.x -= self.speed
-        if keys[keybinds['move_right']] and self.rect.right < SCREEN_WIDTH:
-            self.rect.x += self.speed
-        if keys[keybinds['move_up']] and self.rect.top > 0:
-            self.rect.y -= self.speed
-        if keys[keybinds['move_down']] and self.rect.bottom < SCREEN_HEIGHT:
-            self.rect.y += self.speed
-            
-        # Movement with Arrow Keys
-        if keys[pygame.K_LEFT] and self.rect.left > 0:
-            self.rect.x -= self.speed
-        if keys[pygame.K_RIGHT] and self.rect.right < SCREEN_WIDTH:
-            self.rect.x += self.speed
-        if keys[pygame.K_UP] and self.rect.top > 0:
-            self.rect.y -= self.speed
-        if keys[pygame.K_DOWN] and self.rect.bottom < SCREEN_HEIGHT:
-            self.rect.y += self.speed
+        # Update stamina based on action
+        if self.is_sprinting and self.stamina > 0:
+            self.stamina -= self.stamina_drain_rate
+            if self.stamina < 0:
+                self.stamina = 0
+                self.is_sprinting = False # Stop sprinting if stamina runs out
+        else:
+            self.stamina = min(self.max_stamina, self.stamina + self.stamina_recharge_rate)
+        
+        # Determine the current speed
+        current_speed = self.sprint_speed if self.is_sprinting and self.stamina > 0 else self.base_speed
+
+        # Normalize diagonal movement to prevent faster movement
+        if dx != 0 and dy != 0:
+            dx /= 1.414
+            dy /= 1.414
+        
+        # Apply the determined speed to the movement vectors
+        new_dx = dx * current_speed
+        new_dy = dy * current_speed
+
+        # Move only in the x-direction first
+        self.rect.x += new_dx
+
+        # Check for collision with walls and locked doors after x-movement
+        for wall in walls:
+            if self.rect.colliderect(wall):
+                if new_dx > 0: # Moving right
+                    self.rect.right = wall.left
+                if new_dx < 0: # Moving left
+                    self.rect.left = wall.right
+        for door in doors:
+            if door.locked and self.rect.colliderect(door.rect):
+                if new_dx > 0:
+                    self.rect.right = door.rect.left
+                if new_dx < 0:
+                    self.rect.left = door.rect.right
+
+        # Move only in the y-direction next
+        self.rect.y += new_dy
+
+        # Check for collision with walls and locked doors after y-movement
+        for wall in walls:
+            if self.rect.colliderect(wall):
+                if new_dy > 0: # Moving down
+                    self.rect.bottom = wall.top
+                if new_dy < 0: # Moving up
+                    self.rect.top = wall.bottom
+        for door in doors:
+            if door.locked and self.rect.colliderect(door.rect):
+                if new_dy > 0:
+                    self.rect.bottom = door.rect.top
+                if new_dy < 0:
+                    self.rect.top = door.rect.bottom
+
+        # Check for screen boundary collision
+        self.rect.left = max(0, self.rect.left)
+        self.rect.right = min(SCREEN_WIDTH, self.rect.right)
+        self.rect.top = max(0, self.rect.top)
+        self.rect.bottom = min(SCREEN_HEIGHT, self.rect.bottom)
 
 
-    def draw(self):
-        """
-        Draws the player on the screen.
-        """
-        screen.blit(self.image, self.rect)
-
-    def shoot(self, mouse_pos, all_sprites, bullets):
-        """
-        Creates a new bullet instance and adds it to the bullet group.
-        Fires only if the fire rate cooldown has passed.
-        """
-        current_time = pygame.time.get_ticks()
-        if current_time - self.last_shot_time > self.fire_rate:
-            shoot_sound.play()
-            direction = math.atan2(mouse_pos[1] - self.rect.centery, mouse_pos[0] - self.rect.centerx)
-            # Change bullet color based on weapon
-            if self.current_weapon == 'machine_gun':
-                bullet_color = YELLOW
-            elif self.current_weapon == 'gatling_gun':
-                bullet_color = MAGENTA
+        # Update invulnerability timer
+        if self.invulnerable_timer > 0:
+            self.invulnerable_timer -= 1
+            # Flash the player to indicate invulnerability
+            if self.invulnerable_timer % 10 < 5:
+                self.image.fill(WHITE)
             else:
-                bullet_color = RED
-
-            bullet = Bullet(self.rect.center, direction, bullet_color)
-            all_sprites.add(bullet)
-            bullets.add(bullet)
-            self.last_shot_time = current_time
-        
-    def restore_health(self, amount):
-        """
-        Restores player's health up to the maximum.
-        """
-        self.health = min(self.max_health, self.health + amount)
+                self.image.fill(PLAYER_COLOR)
+        else:
+            self.image.fill(PLAYER_COLOR)
 
 
-class Zombie(pygame.sprite.Sprite):
-    """
-    Represents a zombie enemy.
-    Moves towards the player.
-    Initial speed is slower, but increases when hit by a bullet.
-    """
-    def __init__(self, initial_health):
+class NPC(pygame.sprite.Sprite):
+    """Represents a non-player character."""
+    def __init__(self, x, y, dialogue, patrol_range=20):
         super().__init__()
-        # Create a circular zombie icon
-        self.image = pygame.Surface([40, 40], pygame.SRCALPHA)
-        pygame.draw.circle(self.image, GREEN, (20, 20), 20)
-        self.rect = self.image.get_rect()
-        # Spawn zombie at a random position outside the screen
-        side = random.choice(['top', 'bottom', 'left', 'right'])
-        if side == 'top':
-            self.rect.x = random.randint(0, SCREEN_WIDTH)
-            self.rect.y = -50
-        elif side == 'bottom':
-            self.rect.x = random.randint(0, SCREEN_WIDTH)
-            self.rect.y = SCREEN_HEIGHT + 50
-        elif side == 'left':
-            self.rect.x = -50
-            self.rect.y = random.randint(0, SCREEN_HEIGHT)
-        else: # side == 'right'
-            self.rect.x = SCREEN_WIDTH + 50
-            self.rect.y = random.randint(0, SCREEN_HEIGHT)
-
-        # Zombies start slow and speed up when hit
-        self.speed = random.uniform(0.5, 1.5)
-        self.health = initial_health
-
-    def update(self, player_rect):
-        """
-        Moves the zombie towards the player's current position.
-        """
-        dx = player_rect.x - self.rect.x
-        dy = player_rect.y - self.rect.y
-        dist = math.hypot(dx, dy)
-        if dist > 0:
-            self.rect.x += self.speed * dx / dist
-            self.rect.y += self.speed * dy / dist
-            
-    def speed_up(self, amount):
-        """
-        Increases the zombie's speed.
-        """
-        self.speed += amount
-
-    def draw(self):
-        """
-        Draws the zombie on the screen.
-        """
-        screen.blit(self.image, self.rect)
-
-class WanderingZombie(Zombie):
-    """
-    A zombie that wanders aimlessly on the screen.
-    Used for the background of the menu.
-    """
-    def __init__(self):
-        super().__init__(initial_health=1) # A wandering zombie has minimal health
-        self.speed = random.uniform(0.5, 1.5)
-        # Give a random direction at the start
-        self.vel_x = random.uniform(-1, 1) * self.speed
-        self.vel_y = random.uniform(-1, 1) * self.speed
+        self.image = pygame.Surface((TILE_SIZE, TILE_SIZE))
+        self.image.fill(NPC_COLOR)
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.dialogue = dialogue
+        self.speed = 1
         
-        # Reset position to a random edge of the screen
-        side = random.choice(['top', 'bottom', 'left', 'right'])
-        if side == 'top':
-            self.rect.x = random.randint(0, SCREEN_WIDTH)
-            self.rect.y = -50
-        elif side == 'bottom':
-            self.rect.x = random.randint(0, SCREEN_WIDTH)
-            self.rect.y = SCREEN_HEIGHT + 50
-        elif side == 'left':
-            self.rect.x = -50
-            self.rect.y = random.randint(0, SCREEN_HEIGHT)
-        else: # side == 'right'
-            self.rect.x = SCREEN_WIDTH + 50
-            self.rect.y = random.randint(0, SCREEN_HEIGHT)
+        # Define the patrol area for slight movement
+        self.patrol_start = (x, y)
+        self.patrol_end = (x + patrol_range, y + patrol_range)
+
+        # Choose a random initial movement direction for both axes
+        self.move_direction_x = random.choice([-1, 1])
+        self.move_direction_y = random.choice([-1, 1])
     
     def update(self):
-        """
-        Moves the zombie and resets its position if it goes off-screen.
-        """
-        self.rect.x += self.vel_x
-        self.rect.y += self.vel_y
+        """Update the NPC's position within its patrol area."""
+        self.rect.x += self.speed * self.move_direction_x
+        self.rect.y += self.speed * self.move_direction_y
 
-        # Reset zombie if it goes off screen
-        if self.rect.right < -50 or self.rect.left > SCREEN_WIDTH + 50 or \
-           self.rect.bottom < -50 or self.rect.top > SCREEN_HEIGHT + 50:
-            self.__init__() # Re-initialize to a new random position and direction
+        # Reverse direction if hitting horizontal boundaries
+        if self.rect.x > self.patrol_end[0] or self.rect.x < self.patrol_start[0]:
+            self.move_direction_x *= -1
+        # Reverse direction if hitting vertical boundaries
+        if self.rect.y > self.patrol_end[1] or self.rect.y < self.patrol_start[1]:
+            self.move_direction_y *= -1
 
-class Bullet(pygame.sprite.Sprite):
-    """
-    Represents a bullet fired by the player.
-    """
-    def __init__(self, pos, direction, color):
+class Door(pygame.sprite.Sprite):
+    """Represents a door that can transition to another level."""
+    def __init__(self, x, y, locked=True):
         super().__init__()
-        self.image = pygame.Surface([5, 5])
-        self.image.fill(color)
-        self.rect = self.image.get_rect(center=pos)
-        self.speed = 10
-        self.vel_x = self.speed * math.cos(direction)
-        self.vel_y = self.speed * math.sin(direction)
+        self.image = pygame.Surface((TILE_SIZE, TILE_SIZE))
+        self.image.fill(DOOR_COLOR)
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.locked = locked
+
+class Key(pygame.sprite.Sprite):
+    """Represents a key that can be collected."""
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface((TILE_SIZE, TILE_SIZE))
+        self.image.fill(KEY_COLOR)
+        self.rect = self.image.get_rect(topleft=(x, y))
+
+class Enemy(pygame.sprite.Sprite):
+    """Represents a moving enemy."""
+    def __init__(self, x, y, patrol_range):
+        super().__init__()
+        self.image = pygame.Surface((TILE_SIZE, TILE_SIZE))
+        self.image.fill(ENEMY_COLOR)
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.speed = 2
+        
+        # Define the patrol area
+        self.patrol_start = (x, y)
+        self.patrol_end = (x + patrol_range, y + patrol_range)
+
+        # Choose a random initial movement direction for both axes
+        self.move_direction_x = random.choice([-1, 1])
+        self.move_direction_y = random.choice([-1, 1])
 
     def update(self):
-        """
-        Moves the bullet and kills it if it goes off-screen.
-        """
-        self.rect.x += self.vel_x
-        self.rect.y += self.vel_y
-        if self.rect.right < 0 or self.rect.left > SCREEN_WIDTH or \
-           self.rect.bottom < 0 or self.rect.top > SCREEN_HEIGHT:
-            self.kill()
+        """Update the enemy's position within its patrol area."""
+        self.rect.x += self.speed * self.move_direction_x
+        self.rect.y += self.speed * self.move_direction_y
 
-    def draw(self):
-        """
-        Draws the bullet on the screen.
-        """
-        screen.blit(self.image, self.rect)
-        
+        # Reverse direction if hitting horizontal boundaries
+        if self.rect.x > self.patrol_end[0] or self.rect.x < self.patrol_start[0]:
+            self.move_direction_x *= -1
+        # Reverse direction if hitting vertical boundaries
+        if self.rect.y > self.patrol_end[1] or self.rect.y < self.patrol_start[1]:
+            self.move_direction_y *= -1
+
+class Torch(pygame.sprite.Sprite):
+    """Represents a static torch light source."""
+    def __init__(self, x, y):
+        super().__init__()
+        self.image = pygame.Surface((TILE_SIZE // 2, TILE_SIZE // 2))
+        self.image.fill(TORCH_COLOR)
+        self.rect = self.image.get_rect(center=(x, y))
+
 class PowerUp(pygame.sprite.Sprite):
-    """
-    Represents a health-restoring power-up.
-    """
-    def __init__(self):
+    """Represents a collectible power-up."""
+    def __init__(self, x, y, color, type):
         super().__init__()
-        self.image = pygame.Surface([20, 20], pygame.SRCALPHA)
-        pygame.draw.circle(self.image, DARK_RED, (10, 10), 10)
-        self.rect = self.image.get_rect(center=(random.randint(50, SCREEN_WIDTH - 50), random.randint(50, SCREEN_HEIGHT - 50)))
-        
-    def update(self):
-        # The power-up doesn't move, so this method is empty.
-        pass
-        
-class Particle:
-    """
-    Represents a single particle for a visual effect.
-    """
-    def __init__(self, pos, color):
-        self.pos = list(pos)
-        self.color = color
-        self.velocity = [random.uniform(-3, 3), random.uniform(-3, 3)]
-        self.lifespan = random.randint(10, 30)
-        self.size = 5
+        self.image = pygame.Surface((TILE_SIZE, TILE_SIZE))
+        self.image.fill(color)
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.type = type
 
-    def update(self):
-        # Update particle position
-        self.pos[0] += self.velocity[0]
-        self.pos[1] += self.velocity[1]
-        # Decrease lifespan
-        self.lifespan -= 1
-        # Decrease size slightly for a fading effect
-        self.size = max(0, self.size - 0.2)
+# --- Dungeon Generation ---
+def _is_valid_spawn_pos(x, y, layout, padding=1):
+    """Checks if a position is a valid floor tile with padding."""
+    # Check if the tile is within bounds
+    if not (0 < y < len(layout) - 1 and 0 < x < len(layout[0]) - 1):
+        return False
+    # Check if the tile is a floor
+    if layout[y][x] != 0:
+        return False
+    # Check for padding
+    for dy in range(-padding, padding + 1):
+        for dx in range(-padding, padding + 1):
+            if layout[y + dy][x + dx] != 0:
+                return False
+    return True
 
-    def draw(self, screen_surface):
-        if self.lifespan > 0 and self.size > 0:
-            pygame.draw.circle(screen_surface, self.color, (int(self.pos[0]), int(self.pos[1])), int(self.size))
 
-class Barrier(pygame.sprite.Sprite):
-    """
-    Represents a barrier that blocks movement.
-    """
-    def __init__(self, pos):
-        super().__init__()
-        self.width = random.randint(50, 200)
-        self.height = random.randint(50, 200)
-        self.image = pygame.Surface([self.width, self.height])
-        self.image.fill(BARRIER_COLOR)
-        self.rect = self.image.get_rect(topleft=pos)
+def _generate_simple_dungeon(width, height):
+    """Generates a simple, empty square dungeon."""
+    layout = [[1 for _ in range(width)] for _ in range(height)]
+    # Create the floor
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            layout[y][x] = 0
+    return layout
 
-# --- Helper Functions ---
-def draw_floor_background():
-    """
-    Draws a tiled hexagonal floor pattern on the screen.
-    This version uses a correct alignment algorithm for flat-topped hexagons
-    and eight shades of gray for the tiles.
-    """
-    hex_radius = HEX_SIDE
-    hex_width = hex_radius * 2
-    hex_height = hex_radius * math.sqrt(3)
-
-    # Calculate number of hexes to draw
-    num_cols = int(SCREEN_WIDTH / (hex_width * 0.75)) + 2
-    num_rows = int(SCREEN_HEIGHT / hex_height) + 2
-
-    for row in range(num_rows):
-        for col in range(num_cols):
-            # Calculate the center of the hexagon
-            x_pos = col * hex_width * 0.75
-            y_pos = row * hex_height
-            
-            # Apply offset for every other column
-            if col % 2 != 0:
-                y_pos += hex_height / 2
-
-            # Determine color based on a more robust pattern
-            # The (row * 2 + col) % 7 pattern provides a better distribution for hex grids.
-            color_index = (row * 2 + col) % 7
-            color = FLOOR_COLORS[color_index]
-
-            # Vertices for a flat-topped hexagon
-            vertices = [
-                (x_pos + hex_radius, y_pos),
-                (x_pos + hex_radius * 0.5, y_pos + hex_height * 0.5),
-                (x_pos - hex_radius * 0.5, y_pos + hex_height * 0.5),
-                (x_pos - hex_radius, y_pos),
-                (x_pos - hex_radius * 0.5, y_pos - hex_height * 0.5),
-                (x_pos + hex_radius * 0.5, y_pos - hex_height * 0.5),
-            ]
-            
-            pygame.draw.polygon(screen, color, vertices)
-
-# --- Menu Functions ---
-def show_start_menu():
-    """
-    Displays the game's main menu, with New Game, Options, and Quit buttons.
-    """
-    menu_running = True
+def _generate_maze_dungeon(width, height):
+    """Generates a maze using a simplified randomized depth-first search (DFS)."""
+    layout = [[1 for _ in range(width)] for _ in range(height)]
+    stack = []
     
-    # Create a group for the zombies wandering in the background
-    wandering_zombies = pygame.sprite.Group()
-    for _ in range(5):
-        wandering_zombies.add(WanderingZombie())
+    # Start at a random even-numbered cell
+    start_x = random.randrange(1, width, 2)
+    start_y = random.randrange(1, height, 2)
+    
+    layout[start_y][start_x] = 0
+    stack.append((start_x, start_y))
 
-    while menu_running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if new_game_rect.collidepoint(event.pos):
-                    return "new_game"
-                if options_rect.collidepoint(event.pos):
-                    return "options_menu"
-                if quit_rect.collidepoint(event.pos):
-                    pygame.quit()
-                    quit()
+    while stack:
+        current_x, current_y = stack.pop()
         
-        # Draw the tiled floor background first
-        draw_floor_background()
-        
-        # Draw zombies in the background
-        wandering_zombies.update()
-        wandering_zombies.draw(screen)
+        # Define possible neighbors to move to (2 steps away)
+        neighbors = []
+        if current_x > 1: neighbors.append((current_x - 2, current_y))
+        if current_x < width - 2: neighbors.append((current_x + 2, current_y))
+        if current_y > 1: neighbors.append((current_x, current_y - 2))
+        if current_y < height - 2: neighbors.append((current_x, current_y + 2))
 
-        # Draw the menu text and buttons on top
-        title_text = large_font.render("ZOMBIE SHOOTER", True, WHITE)
-        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4))
-        screen.blit(title_text, title_rect)
+        unvisited_neighbors = []
+        for nx, ny in neighbors:
+            if layout[ny][nx] == 1:
+                unvisited_neighbors.append((nx, ny))
 
-        new_game_text = font.render("New Game", True, WHITE)
-        new_game_rect = new_game_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
-        
-        options_text = font.render("Options", True, WHITE)
-        options_rect = options_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
+        if unvisited_neighbors:
+            stack.append((current_x, current_y))
+            next_x, next_y = random.choice(unvisited_neighbors)
+            
+            # Carve a path to the neighbor
+            wall_x = current_x + (next_x - current_x) // 2
+            wall_y = current_y + (next_y - current_y) // 2
+            layout[wall_y][wall_x] = 0
+            layout[next_y][next_x] = 0
+            
+            stack.append((next_x, next_y))
+            
+    return layout
 
-        quit_text = font.render("Quit", True, WHITE)
-        quit_rect = quit_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 50))
+def generate_dungeon(level):
+    """Generates a full dungeon with all objects based on the level."""
+    # Define a base dungeon size
+    width = SCREEN_WIDTH // TILE_SIZE
+    height = SCREEN_HEIGHT // TILE_SIZE
 
-        screen.blit(new_game_text, new_game_rect)
-        screen.blit(options_text, options_rect)
-        screen.blit(quit_text, quit_rect)
-        
-        pygame.display.flip()
+    if level == 1:
+        layout = _generate_simple_dungeon(width, height)
+    else:
+        # Increase complexity by creating a maze
+        layout = _generate_maze_dungeon(width, height)
+    
+    # Find all floor tiles to place items on
+    floor_tiles = []
+    for y in range(1, height - 1):
+        for x in range(1, width - 1):
+            if layout[y][x] == 0:
+                floor_tiles.append((x, y))
 
-def show_options_menu():
-    """
-    Displays the options menu with buttons for Audio and Controls.
-    """
-    options_running = True
-    while options_running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if audio_rect.collidepoint(event.pos):
-                    return "audio_menu"
-                if controls_rect.collidepoint(event.pos):
-                    return "controls_menu"
-                if back_rect.collidepoint(event.pos):
-                    return "start_menu"
+    # Place player spawn at a random floor tile
+    player_spawn_pos = random.choice(floor_tiles)
+    floor_tiles.remove(player_spawn_pos)
 
-        draw_floor_background()
+    # Place key and NPC at random floor tiles
+    key_pos = random.choice(floor_tiles)
+    floor_tiles.remove(key_pos)
+    
+    npc_pos = random.choice(floor_tiles)
+    floor_tiles.remove(npc_pos)
 
-        # Title
-        title_text = large_font.render("OPTIONS", True, WHITE)
-        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4))
-        screen.blit(title_text, title_rect)
-        
-        # Audio button
-        audio_text = font.render("Audio", True, WHITE)
-        audio_rect = audio_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
-        screen.blit(audio_text, audio_rect)
-        
-        # Controls button
-        controls_text = font.render("Controls", True, WHITE)
-        controls_rect = controls_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
-        screen.blit(controls_text, controls_rect)
+    # Place power-ups
+    power_ups_to_spawn = []
+    if floor_tiles:
+        heal_pos = random.choice(floor_tiles)
+        floor_tiles.remove(heal_pos)
+        power_ups_to_spawn.append({"pos": heal_pos, "type": "heal"})
+    if floor_tiles:
+        enemy_bomb_pos = random.choice(floor_tiles)
+        floor_tiles.remove(enemy_bomb_pos)
+        power_ups_to_spawn.append({"pos": enemy_bomb_pos, "type": "enemy_bomb"})
+    if floor_tiles:
+        fog_clear_pos = random.choice(floor_tiles)
+        floor_tiles.remove(fog_clear_pos)
+        power_ups_to_spawn.append({"pos": fog_clear_pos, "type": "fog_clear"})
+    
+    # Place enemies
+    num_enemies = min(level + 1, 5) # Increase number of enemies per level
+    enemies_to_spawn = []
+    for _ in range(num_enemies):
+        if not floor_tiles:
+            break
+        enemy_pos = random.choice(floor_tiles)
+        floor_tiles.remove(enemy_pos)
+        enemies_to_spawn.append({"pos": enemy_pos, "patrol_range": random.randint(50, 150)})
 
-        # Back button
-        back_text = font.render("Back", True, WHITE)
-        back_rect = back_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100))
-        screen.blit(back_text, back_rect)
+    # Place torches
+    num_torches = 3
+    torches_to_spawn = []
+    for _ in range(num_torches):
+        if not floor_tiles:
+            break
+        torch_pos = random.choice(floor_tiles)
+        floor_tiles.remove(torch_pos)
+        torches_to_spawn.append({"pos": torch_pos})
 
-        pygame.display.flip()
+    # Place door at a random wall tile
+    door_pos = None
+    wall_tiles = []
+    for y in range(height):
+        for x in range(width):
+            if layout[y][x] == 1 and (y == 0 or y == height - 1 or x == 0 or x == width - 1):
+                wall_tiles.append((x, y))
+    
+    door_pos = random.choice(wall_tiles)
+    
+    # Carve a space for the door
+    layout[door_pos[1]][door_pos[0]] = 0
+    # To ensure the door is accessible, create a small path to it
+    if door_pos[1] == 0:
+        layout[1][door_pos[0]] = 0
+    elif door_pos[1] == height - 1:
+        layout[height - 2][door_pos[0]] = 0
+    elif door_pos[0] == 0:
+        layout[door_pos[1]][1] = 0
+    elif door_pos[0] == width - 1:
+        layout[door_pos[1]][width - 2] = 0
+    
 
-def show_audio_menu():
-    """
-    Displays the audio options menu with controls for volume and mute.
-    """
-    global global_volume, is_muted, shoot_sound, hit_sound, zombie_death_sound
-    audio_running = True
-    slider_dragging = False
+    return {
+        "layout": layout,
+        "npcs": [{"pos": npc_pos, "dialogue": "You need to find a key to unlock the door!", "patrol_range": 20}],
+        "enemies": enemies_to_spawn,
+        "torches": torches_to_spawn,
+        "doors": [{"pos": door_pos, "locked": True}],
+        "keys": [{"pos": key_pos}],
+        "power_ups": power_ups_to_spawn,
+        "player_spawn_pos": player_spawn_pos
+    }
 
-    # Define slider dimensions and position
-    slider_x = SCREEN_WIDTH // 2 - 100
-    slider_y = SCREEN_HEIGHT // 2 - 50
-    slider_width = 200
+# NEW FOG OF WAR GLOBAL VARIABLES
+TILE_GRID_WIDTH = SCREEN_WIDTH // TILE_SIZE
+TILE_GRID_HEIGHT = SCREEN_HEIGHT // TILE_SIZE
+visited_tiles = np.zeros((TILE_GRID_HEIGHT, TILE_GRID_WIDTH), dtype=bool)
+
+
+def load_map(map_data):
+    """Loads a new map from the generated map data."""
+    global player, walls, npcs, torches, active_dialogue, keys, doors, enemies, visited_tiles, power_ups
+    
+    # Reset game objects for the new map
+    walls = []
+    npcs = pygame.sprite.Group()
+    torches = pygame.sprite.Group()
+    doors = pygame.sprite.Group()
+    keys = pygame.sprite.Group()
+    enemies = pygame.sprite.Group()
+    power_ups = pygame.sprite.Group()
+    active_dialogue = None
+    
+    # Reset visited tiles for the new map
+    visited_tiles = np.zeros((TILE_GRID_HEIGHT, TILE_GRID_WIDTH), dtype=bool)
+
+    # Populate walls from map layout
+    for row_idx, row in enumerate(map_data["layout"]):
+        for col_idx, cell in enumerate(row):
+            x = col_idx * TILE_SIZE
+            y = row_idx * TILE_SIZE
+            if cell == 1:
+                wall_rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
+                walls.append(wall_rect)
+
+    # Place player at the specified spawn position
+    spawn_pos = (map_data["player_spawn_pos"][0] * TILE_SIZE, map_data["player_spawn_pos"][1] * TILE_SIZE)
+    if player is None:
+        player = Player(spawn_pos[0], spawn_pos[1])
+    else:
+        player.rect.center = (spawn_pos[0] + TILE_SIZE/2, spawn_pos[1] + TILE_SIZE/2)
+        player.has_key = False # Reset key on new map
+        player.life_points = 100 # Reset life points
+        player.inventory = [] # Reset inventory
+        player.stamina = player.max_stamina # Refill stamina on new level
+
+    # Create NPCs from map data
+    for npc_data in map_data["npcs"]:
+        npcs.add(NPC(npc_data["pos"][0] * TILE_SIZE, npc_data["pos"][1] * TILE_SIZE, npc_data["dialogue"], npc_data["patrol_range"]))
+
+    # Create enemies from map data
+    for enemy_data in map_data["enemies"]:
+        enemies.add(Enemy(enemy_data["pos"][0] * TILE_SIZE, enemy_data["pos"][1] * TILE_SIZE, enemy_data["patrol_range"]))
+
+    # Create torches from map data
+    for torch_data in map_data["torches"]:
+        torches.add(Torch(torch_data["pos"][0] * TILE_SIZE + TILE_SIZE // 2, torch_data["pos"][1] * TILE_SIZE + TILE_SIZE // 2))
+
+    # Create keys from map data
+    for key_data in map_data["keys"]:
+        keys.add(Key(key_data["pos"][0] * TILE_SIZE, key_data["pos"][1] * TILE_SIZE))
+    
+    # Create doors from map data
+    for door_data in map_data["doors"]:
+        doors.add(Door(door_data["pos"][0] * TILE_SIZE, door_data["pos"][1] * TILE_SIZE, door_data["locked"]))
+
+    # Create power-ups from map data
+    for pu_data in map_data["power_ups"]:
+        color = None
+        if pu_data["type"] == "heal":
+            color = HEAL_COLOR
+        elif pu_data["type"] == "enemy_bomb":
+            color = ENEMY_BOMB_COLOR
+        elif pu_data["type"] == "fog_clear":
+            color = FOG_CLEAR_COLOR
+        if color:
+            power_ups.add(PowerUp(pu_data["pos"][0] * TILE_SIZE, pu_data["pos"][1] * TILE_SIZE, color, pu_data["type"]))
+
+
+# Initial map load
+current_dungeon_data = generate_dungeon(current_level)
+# Add the 'player' variable initialization here.
+player = None
+load_map(current_dungeon_data)
+
+# --- Functions for drawing different screens ---
+
+def get_key_name(key_code):
+    """Converts a pygame key code to a readable string."""
+    return pygame.key.name(key_code).upper()
+
+def draw_menu():
+    """Draws the main menu screen."""
+    screen.fill(BLACK)
+    
+    # Title text
+    title_text = font.render("A Hero's Journey", True, WHITE)
+    title_rect = title_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4))
+    screen.blit(title_text, title_rect)
+    
+    # Start button text
+    start_text = small_font.render("Start Game", True, WHITE)
+    start_rect = start_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
+    
+    # Options button text (new)
+    options_text = small_font.render("Options", True, WHITE)
+    options_rect = options_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 70))
+    
+    # Simple button logic: change color on hover
+    mouse_pos = pygame.mouse.get_pos()
+    
+    # Draw Start button
+    start_button_color = GREEN if start_rect.inflate(20, 10).collidepoint(mouse_pos) else DARK_GREEN
+    pygame.draw.rect(screen, start_button_color, start_rect.inflate(20, 10), border_radius=10)
+    screen.blit(start_text, start_rect)
+    
+    # Draw Options button
+    options_button_color = GREEN if options_rect.inflate(20, 10).collidepoint(mouse_pos) else DARK_GREEN
+    pygame.draw.rect(screen, options_button_color, options_rect.inflate(20, 10), border_radius=10)
+    screen.blit(options_text, options_rect)
+
+def draw_options_menu():
+    """Draws the options menu screen."""
+    screen.fill(BLACK)
+    
+    # Title text
+    title_text = font.render("Options", True, WHITE)
+    title_rect = title_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4))
+    screen.blit(title_text, title_rect)
+
+    # Audio button
+    audio_text = small_font.render("Audio", True, WHITE)
+    audio_rect = audio_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 50))
+    audio_button_color = GREEN if audio_rect.inflate(20, 10).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+    pygame.draw.rect(screen, audio_button_color, audio_rect.inflate(20, 10), border_radius=10)
+    screen.blit(audio_text, audio_rect)
+
+    # Controls button
+    controls_text = small_font.render("Controls", True, WHITE)
+    controls_rect = controls_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
+    controls_button_color = GREEN if controls_rect.inflate(20, 10).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+    pygame.draw.rect(screen, controls_button_color, controls_rect.inflate(20, 10), border_radius=10)
+    screen.blit(controls_text, controls_rect)
+
+    # Back button
+    back_text = small_font.render("Back", True, WHITE)
+    back_rect = back_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 50))
+    back_button_color = GREEN if back_rect.inflate(20, 10).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+    pygame.draw.rect(screen, back_button_color, back_rect.inflate(20, 10), border_radius=10)
+    screen.blit(back_text, back_rect)
+
+def draw_audio_menu():
+    """Draws a placeholder for the audio settings menu."""
+    screen.fill(BLACK)
+    
+    # Title text
+    title_text = font.render("Audio Settings", True, WHITE)
+    title_rect = title_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4))
+    screen.blit(title_text, title_rect)
+
+    # Volume Slider
+    slider_width = 300
     slider_height = 20
+    slider_x = SCREEN_WIDTH / 2 - slider_width / 2
+    slider_y = SCREEN_HEIGHT / 2 - 50
     slider_rect = pygame.Rect(slider_x, slider_y, slider_width, slider_height)
-
-    # Mute button dimensions and position
-    mute_button_x = SCREEN_WIDTH // 2 - 100
-    mute_button_y = SCREEN_HEIGHT // 2
-    mute_button_width = 200
-    mute_button_height = 50
-    mute_button_rect = pygame.Rect(mute_button_x, mute_button_y, mute_button_width, mute_button_height)
-
-    while audio_running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
-            
-            # Handle mouse events for the slider and buttons
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if slider_rect.collidepoint(event.pos):
-                    slider_dragging = True
-                if mute_button_rect.collidepoint(event.pos):
-                    is_muted = not is_muted
-                    # Set volume on individual sound objects instead of the mixer module
-                    if is_muted:
-                        shoot_sound.set_volume(0)
-                        hit_sound.set_volume(0)
-                        zombie_death_sound.set_volume(0)
-                    else:
-                        shoot_sound.set_volume(global_volume)
-                        hit_sound.set_volume(global_volume)
-                        zombie_death_sound.set_volume(global_volume)
-                if back_rect.collidepoint(event.pos):
-                    return "options_menu"
-
-            if event.type == pygame.MOUSEBUTTONUP:
-                slider_dragging = False
-
-            if event.type == pygame.MOUSEMOTION and slider_dragging:
-                # Update volume based on mouse position
-                mouse_x = event.pos[0]
-                # Clamp the position to the slider's boundaries
-                slider_knob_x = max(slider_x, min(mouse_x, slider_x + slider_width))
-                global_volume = (slider_knob_x - slider_x) / slider_width
-                
-                # Set volume on individual sound objects instead of the mixer module
-                shoot_sound.set_volume(global_volume)
-                hit_sound.set_volume(global_volume)
-                zombie_death_sound.set_volume(global_volume)
-                
-                is_muted = (global_volume == 0)
-
-        draw_floor_background()
-
-        # Title
-        title_text = large_font.render("AUDIO", True, WHITE)
-        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4))
-        screen.blit(title_text, title_rect)
-
-        # Volume label and slider
-        volume_text = font.render("Volume", True, WHITE)
-        volume_rect = volume_text.get_rect(center=(SCREEN_WIDTH // 2, slider_y - 25))
-        screen.blit(volume_text, volume_rect)
-        
-        # Draw the slider track
-        pygame.draw.rect(screen, (100, 100, 100), slider_rect)
-        
-        # Convert slider knob position to an integer to prevent crash
-        slider_knob_x = slider_x + (global_volume * slider_width)
-        pygame.draw.circle(screen, GREEN, (int(slider_knob_x), slider_y + slider_height // 2), 10)
-        
-        # Mute button
-        mute_button_text = font.render("Mute" if not is_muted else "Unmute", True, WHITE)
-        pygame.draw.rect(screen, (50, 50, 50), mute_button_rect)
-        screen.blit(mute_button_text, mute_button_text.get_rect(center=mute_button_rect.center))
-
-        # Back button
-        back_text = font.render("Back", True, WHITE)
-        back_rect = back_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100))
-        screen.blit(back_text, back_rect)
-
-        pygame.display.flip()
-
-def show_controls_menu():
-    """
-    Displays the controls menu with a list of keybindings, now with remapping.
-    """
-    global keybinds
-    controls_running = True
-    remap_mode = False
-    current_key_to_remap = None
     
-    # Calculate button positions
-    button_y_start = SCREEN_HEIGHT // 2 - 100
-    button_spacing = 60
-    button_width = 100
-    button_height = 40
+    # Draw slider background
+    pygame.draw.rect(screen, DARK_GREEN, slider_rect, border_radius=5)
     
-    # Define a list of actions and their button positions
-    actions = [
-        ('move_up', "Move Up"),
-        ('move_down', "Move Down"),
-        ('move_left', "Move Left"),
-        ('move_right', "Move Right")
-    ]
+    # Draw the current volume level bar
+    volume_bar_width = slider_width * music_volume
+    volume_bar_rect = pygame.Rect(slider_x, slider_y, volume_bar_width, slider_height)
+    pygame.draw.rect(screen, GREEN, volume_bar_rect, border_radius=5)
     
-    action_rects = {}
+    # Draw the slider handle
+    handle_x = slider_x + volume_bar_width
+    handle_rect = pygame.Rect(handle_x - 5, slider_y - 5, 10, slider_height + 10)
+    pygame.draw.rect(screen, WHITE, handle_rect)
+    
+    # Volume text
+    volume_text = small_font.render(f"Volume: {int(music_volume * 100)}%", True, WHITE)
+    volume_rect = volume_text.get_rect(center=(SCREEN_WIDTH / 2, slider_y - 30))
+    screen.blit(volume_text, volume_rect)
 
-    while controls_running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
-            if event.type == pygame.MOUSEBUTTONDOWN and not remap_mode:
-                if back_rect.collidepoint(event.pos):
-                    return "options_menu"
-                # Check if a remap button was clicked
-                for action, rect in action_rects.items():
-                    if rect.collidepoint(event.pos):
-                        remap_mode = True
-                        current_key_to_remap = action
+    # Mute button
+    mute_text_str = "Unmute" if is_muted else "Mute"
+    mute_text = small_font.render(mute_text_str, True, WHITE)
+    mute_rect = mute_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30))
+    mute_button_color = GREEN if mute_rect.inflate(20, 10).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+    pygame.draw.rect(screen, mute_button_color, mute_rect.inflate(20, 10), border_radius=10)
+    screen.blit(mute_text, mute_rect)
+
+    # Back button
+    back_text = small_font.render("Back", True, WHITE)
+    back_rect = back_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 100))
+    back_button_color = GREEN if back_rect.inflate(20, 10).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+    pygame.draw.rect(screen, back_button_color, back_rect.inflate(20, 10), border_radius=10)
+    screen.blit(back_text, back_rect)
+
+
+def draw_controls_menu():
+    """Draws the controls settings menu with rebindable keys."""
+    screen.fill(BLACK)
+    
+    # Title text
+    title_text = font.render("Controls", True, WHITE)
+    title_rect = title_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4))
+    screen.blit(title_text, title_rect)
+    
+    # Display the keybinding options
+    key_y_start = SCREEN_HEIGHT / 2 - 100
+    button_x_start = SCREEN_WIDTH / 2 + 50
+    
+    for i, (action, key_code) in enumerate(KEY_BINDINGS.items()):
+        # Action label
+        action_name = action.replace('_', ' ').title()
+        action_text = small_font.render(action_name, True, WHITE)
+        action_rect = action_text.get_rect(right=SCREEN_WIDTH / 2 - 10, centery=key_y_start + i * 50)
+        screen.blit(action_text, action_rect)
+        
+        # Key button
+        key_name = get_key_name(key_code)
+        key_text = small_font.render(key_name, True, WHITE)
+        
+        # Check if this is the key currently being re-bound
+        if rebind_target == action:
+            key_text = small_font.render("Press a key...", True, WHITE)
+            key_button_color = (150, 150, 150) # Gray color to show it's active
+        else:
+            key_button_color = GREEN if pygame.Rect(button_x_start, action_rect.y - 10, 150, 40).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+        
+        key_rect = key_text.get_rect(left=button_x_start, centery=action_rect.centery)
+        key_button_rect = key_rect.inflate(20, 10)
+        pygame.draw.rect(screen, key_button_color, key_button_rect, border_radius=10)
+        screen.blit(key_text, key_rect)
+
+    # Back button
+    back_text = small_font.render("Back", True, WHITE)
+    back_rect = back_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 150))
+    back_button_color = GREEN if back_rect.inflate(20, 10).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+    pygame.draw.rect(screen, back_button_color, back_rect.inflate(20, 10), border_radius=10)
+    screen.blit(back_text, back_rect)
+
+def draw_game_over():
+    """Draws the game over screen."""
+    screen.fill(BLACK)
+    game_over_text = font.render("Game Over", True, (255, 0, 0))
+    game_over_rect = game_over_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
+    screen.blit(game_over_text, game_over_rect)
+
+    restart_text = small_font.render("Press R to Restart", True, WHITE)
+    restart_rect = restart_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 100))
+    screen.blit(restart_text, restart_rect)
+    
+def draw_pause_menu():
+    """Draws the pause menu screen as a semi-transparent overlay."""
+    # Create a semi-transparent surface
+    overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 150)) # Black with 150/255 opacity
+    screen.blit(overlay, (0, 0))
+
+    # Title text
+    title_text = font.render("Paused", True, WHITE)
+    title_rect = title_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 3))
+    screen.blit(title_text, title_rect)
+
+    # Resume button
+    resume_text = small_font.render("Resume", True, WHITE)
+    resume_rect = resume_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
+    resume_button_color = GREEN if resume_rect.inflate(20, 10).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+    pygame.draw.rect(screen, resume_button_color, resume_rect.inflate(20, 10), border_radius=10)
+    screen.blit(resume_text, resume_rect)
+
+    # Exit to Main Menu button
+    exit_text = small_font.render("Exit to Main Menu", True, WHITE)
+    exit_rect = exit_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 60))
+    exit_button_color = GREEN if exit_rect.inflate(20, 10).collidepoint(pygame.mouse.get_pos()) else DARK_GREEN
+    pygame.draw.rect(screen, exit_button_color, exit_rect.inflate(20, 10), border_radius=10)
+    screen.blit(exit_text, exit_rect)
+
+def draw_floor():
+    """Draws a tiled floor pattern on the screen."""
+    screen.fill(FLOOR_COLOR)
+    for y in range(0, SCREEN_HEIGHT, FLOOR_TILE_SIZE):
+        for x in range(0, SCREEN_WIDTH, FLOOR_TILE_SIZE):
+            # Create a checkerboard pattern
+            if (x // FLOOR_TILE_SIZE + y // FLOOR_TILE_SIZE) % 2 == 0:
+                pygame.draw.rect(screen, FLOOR_COLOR_2, (x, y, FLOOR_TILE_SIZE, FLOOR_TILE_SIZE))
+
+def draw_game():
+    """Draws the main game screen with dungeon, player, and NPCs."""
+    # Draw the dungeon floor
+    draw_floor()
+    
+    # Draw the dungeon walls
+    for wall in walls:
+        pygame.draw.rect(screen, WALL_COLOR, wall)
+
+    # Draw the doors, keys, and enemies
+    doors.draw(screen)
+    keys.draw(screen)
+    enemies.draw(screen)
+    power_ups.draw(screen)
+
+    # Draw the player and NPCs
+    npcs.draw(screen)
+    screen.blit(player.image, player.rect)
+    
+    # --- Optimized Lighting Effect ---
+    # Create a light mask with a transparent background
+    light_mask = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    
+    # Add a global ambient light that makes the unlit areas not completely dark
+    ambient_light_level = 50  # Adjust as needed, from 0 to 255
+    light_mask.fill((0, 0, 0, 255 - ambient_light_level))
+    
+    # Define a radius for the light sources
+    light_radius = 200
+
+    # Draw a light circle for each light source
+    light_sources = [(s.rect.centerx, s.rect.centery) for s in torches]
+    # The player also emits light
+    light_sources.append(player.rect.center)
+    
+    for light_x, light_y in light_sources:
+        # Create a surface for a single light gradient
+        light_surface = pygame.Surface((light_radius * 2, light_radius * 2), pygame.SRCALPHA)
+        # Create a gradient effect
+        for i in range(light_radius, 0, -1):
+            alpha = 255 - (i / light_radius) * 255
+            pygame.draw.circle(light_surface, (255, 255, 255, alpha), (light_radius, light_radius), i)
+        
+        # Blit the light surface onto the main light mask using a blend mode
+        light_mask.blit(light_surface, (light_x - light_radius, light_y - light_radius), special_flags=pygame.BLEND_RGBA_SUB)
+
+    # Apply the final light mask to the screen
+    screen.blit(light_mask, (0, 0))
+
+    # --- Fog of War Effect ---
+    # Convert player's position to tile coordinates
+    player_tile_x = player.rect.centerx // TILE_SIZE
+    player_tile_y = player.rect.centery // TILE_SIZE
+
+    # Get the player's current view radius in tiles
+    view_radius_tiles = 3 
+
+    # Mark tiles around the player as visited
+    for y_offset in range(-view_radius_tiles, view_radius_tiles + 1):
+        for x_offset in range(-view_radius_tiles, view_radius_tiles + 1):
+            tile_x = player_tile_x + x_offset
+            tile_y = player_tile_y + y_offset
             
-            # If in remap mode, wait for a key press
-            if event.type == pygame.KEYDOWN and remap_mode:
-                if event.key not in keybinds.values():
-                    keybinds[current_key_to_remap] = event.key
-                    remap_mode = False
-                    current_key_to_remap = None
-                else:
-                    # Inform the user the key is already in use
-                    # A small message box or console message is fine for now
-                    print("Key is already in use!")
+            # Check for valid grid coordinates
+            if 0 <= tile_x < TILE_GRID_WIDTH and 0 <= tile_y < TILE_GRID_HEIGHT:
+                # Mark as visited only if it's within a circle from the player's center
+                dist_sq = (tile_x - player_tile_x)**2 + (tile_y - player_tile_y)**2
+                if dist_sq <= view_radius_tiles**2:
+                    visited_tiles[tile_y, tile_x] = True
 
-        draw_floor_background()
+    # Create the fog surface
+    fog_surface = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    fog_color_seen = (0, 0, 0, 150) # Darken seen areas
+    fog_color_unseen = (0, 0, 0, 255) # Completely black for unseen areas
 
-        # Title
-        title_text = large_font.render("CONTROLS", True, WHITE)
-        title_rect = title_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4))
-        screen.blit(title_text, title_rect)
-        
-        # Display the current keybindings and change buttons
-        for i, (key_action, key_text) in enumerate(actions):
-            # Display action text
-            action_label = font.render(f'{key_text}:', True, WHITE)
-            action_rect = action_label.get_rect(center=(SCREEN_WIDTH // 2 - 100, button_y_start + i * button_spacing))
-            screen.blit(action_label, action_rect)
+    for y in range(TILE_GRID_HEIGHT):
+        for x in range(TILE_GRID_WIDTH):
+            if visited_tiles[y, x]:
+                # Draw a semi-transparent dark rectangle over previously visited tiles
+                fog_rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+                pygame.draw.rect(fog_surface, fog_color_seen, fog_rect)
+            else:
+                # Draw a completely black rectangle over unvisited tiles
+                fog_rect = pygame.Rect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+                pygame.draw.rect(fog_surface, fog_color_unseen, fog_rect)
 
-            # Display the currently bound key
-            current_key_name = pygame.key.name(keybinds[key_action]).upper()
-            key_name_label = font.render(current_key_name, True, YELLOW)
-            key_name_rect = key_name_label.get_rect(center=(SCREEN_WIDTH // 2, button_y_start + i * button_spacing))
-            screen.blit(key_name_label, key_name_rect)
+    # Create a clear circle around the player to represent their immediate view
+    player_view_radius_pixels = view_radius_tiles * TILE_SIZE
+    pygame.draw.circle(fog_surface, (0, 0, 0, 0), player.rect.center, player_view_radius_pixels)
 
-            # Draw the Change button
-            change_button_rect = pygame.Rect(
-                SCREEN_WIDTH // 2 + 50,
-                button_y_start + i * button_spacing - button_height // 2,
-                button_width,
-                button_height
-            )
-            pygame.draw.rect(screen, (50, 50, 50), change_button_rect, border_radius=10)
-            change_text = font.render("Change", True, WHITE)
-            change_text_rect = change_text.get_rect(center=change_button_rect.center)
-            screen.blit(change_text, change_text_rect)
-            action_rects[key_action] = change_button_rect
-        
-        # Display shooting control, which is not remappable
-        shoot_text = font.render("Shoot: Left Mouse Button", True, WHITE)
-        shoot_rect = shoot_text.get_rect(center=(SCREEN_WIDTH // 2, button_y_start + len(actions) * button_spacing + 20))
-        screen.blit(shoot_text, shoot_rect)
+    # Blit the fog of war surface onto the screen
+    screen.blit(fog_surface, (0, 0))
 
-        # Prompt for key change
-        if remap_mode:
-            prompt_text = font.render(f"Press a new key for '{current_key_to_remap.replace('_', ' ').title()}'", True, MAGENTA)
-            prompt_rect = prompt_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 200))
-            screen.blit(prompt_text, prompt_rect)
+    # Draw the life bar
+    bar_width = 200
+    bar_height = 20
+    bar_x = 10
+    bar_y = 10
+    pygame.draw.rect(screen, LIFE_BAR_BG_COLOR, (bar_x, bar_y, bar_width, bar_height))
+    current_life_width = (player.life_points / 100) * bar_width
+    pygame.draw.rect(screen, LIFE_BAR_COLOR, (bar_x, bar_y, current_life_width, bar_height))
+    life_text = small_font.render(f"HP: {player.life_points}", True, WHITE)
+    screen.blit(life_text, (bar_x + bar_width + 10, bar_y - 5))
+    
+    # Draw the stamina bar
+    stamina_bar_x = 10
+    stamina_bar_y = bar_y + bar_height + 10
+    pygame.draw.rect(screen, STAMINA_BAR_BG_COLOR, (stamina_bar_x, stamina_bar_y, bar_width, bar_height))
+    current_stamina_width = (player.stamina / player.max_stamina) * bar_width
+    pygame.draw.rect(screen, STAMINA_BAR_COLOR, (stamina_bar_x, stamina_bar_y, current_stamina_width, bar_height))
+    stamina_text = small_font.render(f"Stamina: {int(player.stamina)}", True, WHITE)
+    screen.blit(stamina_text, (stamina_bar_x + bar_width + 10, stamina_bar_y - 5))
+    
+    # Draw the inventory section
+    inventory_x = stamina_bar_x
+    inventory_y = stamina_bar_y + bar_height + 10 # Position it below the stamina bar
+    
+    # Draw a container for the inventory
+    inventory_size = 50
+    inventory_spacing = 10
+    num_slots = 4
+    total_inventory_width = (inventory_size + inventory_spacing) * num_slots - inventory_spacing
+    
+    # Draw each slot
+    for i in range(num_slots):
+        slot_rect = pygame.Rect(inventory_x + i * (inventory_size + inventory_spacing), inventory_y, inventory_size, inventory_size)
+        pygame.draw.rect(screen, WALL_COLOR, slot_rect, 2) # Draw a border for each slot
 
-        # Back button
-        back_text = font.render("Back", True, WHITE)
-        back_rect = back_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100))
-        screen.blit(back_text, back_rect)
+    # Draw the key icon if the player has the key
+    if player.has_key:
+        key_icon_rect = pygame.Rect(inventory_x, inventory_y, inventory_size, inventory_size)
+        pygame.draw.rect(screen, KEY_COLOR, key_icon_rect)
+    
+    # Draw collected power-ups
+    for i, item_type in enumerate(player.inventory):
+        color = None
+        if item_type == "heal":
+            color = HEAL_COLOR
+        elif item_type == "enemy_bomb":
+            color = ENEMY_BOMB_COLOR
+        elif item_type == "fog_clear":
+            color = FOG_CLEAR_COLOR
+        if color:
+            item_rect = pygame.Rect(inventory_x + (i + 1) * (inventory_size + inventory_spacing), inventory_y, inventory_size, inventory_size)
+            pygame.draw.rect(screen, color, item_rect)
 
-        pygame.display.flip()
+def draw_dialogue(text):
+    """Draws a dialogue box at the bottom of the screen."""
+    # Semi-transparent background
+    dialogue_box = pygame.Surface((SCREEN_WIDTH, 100), pygame.SRCALPHA)
+    dialogue_box.fill((0, 0, 0, 150))
+    
+    # Dialogue text
+    dialogue_text = dialogue_font.render(text, True, WHITE)
+    dialogue_rect = dialogue_text.get_rect(center=(SCREEN_WIDTH / 2, 50))
+    
+    dialogue_box.blit(dialogue_text, dialogue_rect)
+    screen.blit(dialogue_box, (0, SCREEN_HEIGHT - 100))
 
-def show_pause_menu():
-    """
-    Displays the pause menu with Resume and Main Menu buttons.
-    """
-    pause_running = True
-    while pause_running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if resume_rect.collidepoint(event.pos):
-                    return "resume"
-                if main_menu_rect.collidepoint(event.pos):
-                    return "start_menu"
-
-        # Draw the tiled floor background first
-        draw_floor_background()
-
-        # Draw a semi-transparent overlay
-        overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 150))
-        screen.blit(overlay, (0, 0))
-
-        # Draw the menu text and buttons
-        pause_text = large_font.render("PAUSED", True, WHITE)
-        pause_rect = pause_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4))
-        screen.blit(pause_text, pause_rect)
-
-        resume_text = font.render("Resume", True, WHITE)
-        resume_rect = resume_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
-        
-        main_menu_text = font.render("Main Menu", True, WHITE)
-        main_menu_rect = main_menu_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
-
-        screen.blit(resume_text, resume_rect)
-        screen.blit(main_menu_text, main_menu_rect)
-
-        pygame.display.flip()
-        
-def show_game_over_screen(final_score):
-    """
-    Displays the game over screen with the final score and top scores.
-    """
-    global top_scores
-    top_scores.append(final_score)
-    top_scores.sort(reverse=True)
-    top_scores = top_scores[:5] # Keep only the top 5 scores
-
-    game_over_running = True
-    while game_over_running:
-        draw_floor_background()
-        
-        # Game Over Title
-        game_over_text = large_font.render("GAME OVER", True, RED)
-        game_over_rect = game_over_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 4))
-        screen.blit(game_over_text, game_over_rect)
-
-        # Final Score
-        final_score_text = font.render(f"Final Score: {final_score}", True, WHITE)
-        final_score_rect = final_score_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 50))
-        screen.blit(final_score_text, final_score_rect)
-
-        # Top Scores
-        top_scores_title = font.render("Top Scores:", True, WHITE)
-        top_scores_title_rect = top_scores_title.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2))
-        screen.blit(top_scores_title, top_scores_title_rect)
-        
-        for i, score in enumerate(top_scores):
-            score_text = font.render(f"{i + 1}. {score}", True, WHITE)
-            score_rect = score_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 + 30 + i * 30))
-            screen.blit(score_text, score_rect)
-
-        # Return to Menu Button
-        return_text = font.render("Return to Menu", True, WHITE)
-        return_rect = return_text.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100))
-        screen.blit(return_text, return_rect)
-
-        pygame.display.flip()
-        
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if return_rect.collidepoint(event.pos):
-                    return "start_menu"
-
-def main_game_loop():
-    """
-    Contains the main game logic and drawing loop.
-    """
-    # --- Sprite Groups ---
-    all_sprites = pygame.sprite.Group()
-    bullets = pygame.sprite.Group()
-    zombies = pygame.sprite.Group()
-    powerups = pygame.sprite.Group() # New group for power-ups
-    barriers = pygame.sprite.Group() # New group for barriers
-    particles = [] # A list to hold the new particle effects
-
-    # --- Game Variables ---
-    player = Player()
-    all_sprites.add(player)
-    score = 0
-    last_zombie_spawn_time = pygame.time.get_ticks()
-    zombie_spawn_rate = 1250 # in milliseconds, changed from 1000
-    last_powerup_spawn_time = pygame.time.get_ticks()
-    powerup_spawn_rate = 15000 # in milliseconds, a new power-up every 15 seconds
-    is_game_over = False
-    is_paused = False # New state variable for pausing the game
-    is_shooting = False # New state variable to track if the mouse button is held down
-
-    # Generate a random number of barriers and place them on the screen
-    num_barriers = random.randint(3, 7)
-    for _ in range(num_barriers):
-        while True:
-            # Pick a random position for the new barrier, now more evenly spread
-            x = random.randint(100, SCREEN_WIDTH - 100)
-            y = random.randint(100, SCREEN_HEIGHT - 100)
-            new_barrier = Barrier((x, y))
-            
-            # Check for overlaps with other barriers and the player's starting position
-            # This is a simple but effective way to ensure no overlaps
-            overlap = False
-            if pygame.sprite.spritecollide(new_barrier, barriers, False):
-                overlap = True
-            
-            # Also ensure it doesn't spawn too close to the player
-            player_start_rect = pygame.Rect(SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT // 2 - 100, 200, 200)
-            if new_barrier.rect.colliderect(player_start_rect):
-                overlap = True
-
-            if not overlap:
-                all_sprites.add(new_barrier)
-                barriers.add(new_barrier)
-                break
-
-    # --- Main Game Loop ---
+# --- Main Game Loop ---
+def main():
+    global current_state, active_dialogue, current_map_key, walls, npcs, torches, doors, player, keys, enemies, current_level, current_dungeon_data, power_ups, visited_tiles, rebind_target, KEY_BINDINGS, music_volume, is_muted
     running = True
+    
+    # Store the last unmuted volume level
+    last_volume = music_volume
+    
     while running:
-        # --- Event Handling ---
+        # Event handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
-            # Check for escape key to toggle pause
-            if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                is_paused = not is_paused
-            
-            # Track if the mouse button is pressed for rapid fire
-            if not is_paused and not is_game_over:
-                if event.type == pygame.MOUSEBUTTONDOWN:
-                    if event.button == 1: # Left mouse button
-                        is_shooting = True
-                if event.type == pygame.MOUSEBUTTONUP:
-                    if event.button == 1:
-                        is_shooting = False
-        
-        # --- Game Logic ---
-        if not is_game_over and not is_paused:
-            # Check for score thresholds to upgrade gun and increase fire rate
-            if score >= 500 and player.current_weapon != 'gatling_gun':
-                player.current_weapon = 'gatling_gun'
-                player.fire_rate = 50 # Base fire rate for gatling gun
-            elif score >= 250 and player.current_weapon == 'pistol':
-                player.current_weapon = 'machine_gun'
-                player.fire_rate = 100 # Base fire rate for machine gun
-            
-            # Increase fire rate progressively based on score tiers
-            fire_rate_modifier = score // 250
-            if player.current_weapon == 'machine_gun':
-                player.fire_rate = max(50, 100 - (fire_rate_modifier - 1) * 10)
-            elif player.current_weapon == 'gatling_gun':
-                player.fire_rate = max(20, 50 - (fire_rate_modifier - 2) * 5)
-
-
-            # Fire the weapon if the player is holding the mouse button
-            if is_shooting:
-                player.shoot(pygame.mouse.get_pos(), all_sprites, bullets)
-
-            # Store the player's old position before updating
-            player_old_rect = player.rect.copy()
-            
-            # Update player and zombies separately to avoid the TypeError
-            player.update()
-            zombies.update(player.rect)
-            bullets.update()
-            powerups.update()
-            
-            # Update and clean up particles
-            for particle in particles:
-                particle.update()
-            particles = [p for p in particles if p.lifespan > 0]
-            
-            # Collision detection for player and barriers
-            if pygame.sprite.spritecollide(player, barriers, False):
-                player.rect = player_old_rect
-            
-            # Collision detection for zombies and barriers
-            for zombie in zombies:
-                if pygame.sprite.spritecollide(zombie, barriers, False):
-                    # For a simple bounce, reverse the movement direction
-                    zombie.rect.x -= zombie.speed
-                    zombie.rect.y -= zombie.speed
-
-            # Spawn new zombies
-            now = pygame.time.get_ticks()
-            if now - last_zombie_spawn_time > zombie_spawn_rate:
-                zombie_health = 1 + (score // 100) # Difficulty scales with score
-                new_zombie = Zombie(zombie_health)
-                all_sprites.add(new_zombie)
-                zombies.add(new_zombie)
-                last_zombie_spawn_time = now
-                # Increase difficulty over time by reducing spawn rate
-                zombie_spawn_rate = max(200, zombie_spawn_rate - 5)
-
-            # Spawn a new power-up if one isn't on screen
-            now = pygame.time.get_ticks()
-            if len(powerups) == 0 and now - last_powerup_spawn_time > powerup_spawn_rate:
-                new_powerup = PowerUp()
-                all_sprites.add(new_powerup)
-                powerups.add(new_powerup)
-                last_powerup_spawn_time = now
-
-            # Check for collisions between bullets and zombies, and bullets and barriers
-            # Bullets are destroyed on impact with either
-            pygame.sprite.groupcollide(bullets, barriers, True, False)
-            hits = pygame.sprite.groupcollide(zombies, bullets, False, True)
-            for zombie, bullet_hit_list in hits.items():
-                hit_sound.play() # Play sound on hit
-                zombie.health -= len(bullet_hit_list)
-                # Speed up the zombie when it's hit
-                zombie.speed_up(0.5)
-                if zombie.health <= 0:
-                    zombie_death_sound.play() # Play sound on zombie death
-                    # Create a burst of particles when the zombie is destroyed
-                    for _ in range(20):
-                        particles.append(Particle(zombie.rect.center, GREEN))
-                    zombie.kill()
-                    score += 10
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                mouse_pos = pygame.mouse.get_pos()
+                if current_state == GAME_STATES["MENU"]:
+                    start_text_rect = small_font.render("Start Game", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
+                    start_button_rect = start_text_rect.inflate(20, 10)
                     
-            # Check for collisions between bullets and power-ups
-            powerup_hits = pygame.sprite.groupcollide(powerups, bullets, True, True)
-            if powerup_hits:
-                player.restore_health(25) # Restore 25 health
+                    options_text_rect = small_font.render("Options", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 70))
+                    options_button_rect = options_text_rect.inflate(20, 10)
+                    
+                    if start_button_rect.collidepoint(mouse_pos):
+                        print("Starting game...")
+                        current_state = GAME_STATES["GAME"]
+                    elif options_button_rect.collidepoint(mouse_pos):
+                        print("Opening options menu...")
+                        current_state = GAME_STATES["OPTIONS"]
+                elif current_state == GAME_STATES["OPTIONS"]:
+                    audio_text_rect = small_font.render("Audio", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 50))
+                    audio_button_rect = audio_text_rect.inflate(20, 10)
+                    
+                    controls_text_rect = small_font.render("Controls", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
+                    controls_button_rect = controls_text_rect.inflate(20, 10)
+                    
+                    back_text_rect = small_font.render("Back", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 50))
+                    back_button_rect = back_text_rect.inflate(20, 10)
+                    
+                    if audio_button_rect.collidepoint(mouse_pos):
+                        current_state = GAME_STATES["AUDIO_OPTIONS"]
+                    elif controls_button_rect.collidepoint(mouse_pos):
+                        current_state = GAME_STATES["CONTROLS_OPTIONS"]
+                    elif back_button_rect.collidepoint(mouse_pos):
+                        current_state = GAME_STATES["MENU"]
+                elif current_state == GAME_STATES["AUDIO_OPTIONS"]:
+                    back_text_rect = small_font.render("Back", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 100))
+                    back_button_rect = back_text_rect.inflate(20, 10)
+                    
+                    # Volume Slider
+                    slider_width = 300
+                    slider_height = 20
+                    slider_x = SCREEN_WIDTH / 2 - slider_width / 2
+                    slider_y = SCREEN_HEIGHT / 2 - 50
+                    slider_rect = pygame.Rect(slider_x, slider_y, slider_width, slider_height)
+                    
+                    # Mute button
+                    mute_text_rect = small_font.render("Mute", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 30))
+                    mute_button_rect = mute_text_rect.inflate(20, 10)
+                    
+                    if slider_rect.collidepoint(mouse_pos):
+                        # Calculate new volume based on mouse position
+                        new_volume = (mouse_pos[0] - slider_x) / slider_width
+                        music_volume = max(0, min(1, new_volume))
+                        pygame.mixer.music.set_volume(music_volume)
+                        is_muted = False # Unmute if the slider is adjusted
+                        last_volume = music_volume
+                    elif mute_button_rect.collidepoint(mouse_pos):
+                        is_muted = not is_muted
+                        if is_muted:
+                            pygame.mixer.music.set_volume(0)
+                        else:
+                            pygame.mixer.music.set_volume(last_volume)
+                    elif back_button_rect.collidepoint(mouse_pos):
+                        current_state = GAME_STATES["OPTIONS"]
+                elif current_state == GAME_STATES["CONTROLS_OPTIONS"]:
+                    back_text_rect = small_font.render("Back", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 150))
+                    
+                    # Handle clicks on the keybinding buttons
+                    key_y_start = SCREEN_HEIGHT / 2 - 100
+                    button_x_start = SCREEN_WIDTH / 2 + 50
+                    
+                    for i, (action, key_code) in enumerate(KEY_BINDINGS.items()):
+                        key_rect = small_font.render(get_key_name(key_code), True, WHITE).get_rect(left=button_x_start, centery=key_y_start + i * 50)
+                        key_button_rect = key_rect.inflate(20, 10)
+                        if key_button_rect.collidepoint(mouse_pos):
+                            rebind_target = action
+                            current_state = GAME_STATES["REBINDING_KEY"]
+                            break
 
-            # Check for collisions between player and zombies
-            player_hits = pygame.sprite.spritecollide(player, zombies, True)
-            if player_hits:
-                player.health -= 25
-                if player.health <= 0:
-                    is_game_over = True
+                    back_button_rect = back_text_rect.inflate(20, 10)
+                    if back_button_rect.collidepoint(mouse_pos):
+                        current_state = GAME_STATES["OPTIONS"]
+                elif current_state == GAME_STATES["PAUSED"]:
+                    resume_text_rect = small_font.render("Resume", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
+                    resume_button_rect = resume_text_rect.inflate(20, 10)
+                    
+                    exit_text_rect = small_font.render("Exit to Main Menu", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 60))
+                    exit_button_rect = exit_text_rect.inflate(20, 10)
+                    
+                    if resume_button_rect.collidepoint(mouse_pos):
+                        current_state = GAME_STATES["GAME"]
+                    elif exit_button_rect.collidepoint(mouse_pos):
+                        current_level = 1
+                        current_dungeon_data = generate_dungeon(current_level)
+                        load_map(current_dungeon_data)
+                        current_state = GAME_STATES["MENU"]
 
-        # --- Drawing ---
-        draw_floor_background()
+            elif event.type == pygame.KEYDOWN:
+                if current_state == GAME_STATES["REBINDING_KEY"]:
+                    # Re-bind the key
+                    if rebind_target:
+                        KEY_BINDINGS[rebind_target] = event.key
+                        rebind_target = None
+                        current_state = GAME_STATES["CONTROLS_OPTIONS"]
+                elif event.key == pygame.K_ESCAPE:
+                    if current_state == GAME_STATES["GAME"]:
+                        current_state = GAME_STATES["PAUSED"]
+                    elif current_state == GAME_STATES["PAUSED"]:
+                        current_state = GAME_STATES["GAME"]
+                    elif current_state == GAME_STATES["GAME_OVER"]:
+                        running = False
+                elif current_state == GAME_STATES["DIALOGUE"]:
+                    # Press any key to exit dialogue
+                    active_dialogue = None
+                    current_state = GAME_STATES["GAME"]
+                elif current_state == GAME_STATES["GAME_OVER"]:
+                    if event.key == pygame.K_r:
+                        # Restart the game from level 1
+                        current_level = 1
+                        current_dungeon_data = generate_dungeon(current_level)
+                        load_map(current_dungeon_data)
+                        current_state = GAME_STATES["MENU"]
+                elif current_state == GAME_STATES["GAME"]:
+                    if event.key == KEY_BINDINGS["interact"]:
+                        # Create an interaction rect that is slightly larger than the player's rect
+                        interaction_rect = player.rect.inflate(TILE_SIZE // 2, TILE_SIZE // 2)
+
+                        # Check for NPC interaction
+                        npc_interacted = False
+                        for npc in npcs:
+                            if interaction_rect.colliderect(npc.rect):
+                                # Restore a small amount of life when interacting with an NPC
+                                player.life_points = min(100, player.life_points + 20)
+                                active_dialogue = f"{npc.dialogue} Your life has been restored to {player.life_points}!"
+                                current_state = GAME_STATES["DIALOGUE"]
+                                dialogue_sound.play()
+                                npc_interacted = True
+                                break
+                        
+                        if not npc_interacted:
+                            # Check for key collection
+                            key_collected = pygame.sprite.spritecollideany(player, keys)
+                            if key_collected:
+                                keys.remove(key_collected)
+                                player.has_key = True
+                                active_dialogue = "You found a key! It might open something."
+                                current_state = GAME_STATES["DIALOGUE"]
+                                collect_sound.play()
+                            
+                            # Check for power-up collection
+                            power_up_collected = pygame.sprite.spritecollideany(player, power_ups)
+                            if power_up_collected:
+                                if power_up_collected.type == "heal":
+                                    player.life_points = min(100, player.life_points + 50)
+                                    active_dialogue = f"You used a healing potion! Your life is now {player.life_points}."
+                                elif power_up_collected.type == "enemy_bomb":
+                                    enemies.empty()
+                                    active_dialogue = "All enemies have been vanquished!"
+                                elif power_up_collected.type == "fog_clear":
+                                    visited_tiles.fill(True)
+                                    active_dialogue = "The fog of war has been lifted!"
+                                
+                                # Add the power-up to the player's inventory and remove it from the map
+                                player.inventory.append(power_up_collected.type)
+                                power_ups.remove(power_up_collected)
+                                current_state = GAME_STATES["DIALOGUE"]
+                                collect_sound.play()
+
+                            # Check for door interaction to unlock
+                            for door in doors:
+                                if door.locked and interaction_rect.colliderect(door.rect):
+                                    if player.has_key:
+                                        door.locked = False
+                                        unlock_sound.play()
+                                        active_dialogue = "The door is now unlocked. You can pass."
+                                        current_state = GAME_STATES["DIALOGUE"]
+                                        player.has_key = False
+                                    else:
+                                        active_dialogue = "The door is locked. You need a key."
+                                        current_state = GAME_STATES["DIALOGUE"]
+            
+            elif event.type == pygame.KEYUP:
+                if event.key == KEY_BINDINGS["sprint"]:
+                    player.is_sprinting = False
+
+        if current_state == GAME_STATES["MENU"]:
+            draw_menu()
+        elif current_state == GAME_STATES["OPTIONS"]:
+            draw_options_menu()
+        elif current_state == GAME_STATES["AUDIO_OPTIONS"]:
+            draw_audio_menu()
+        elif current_state == GAME_STATES["CONTROLS_OPTIONS"]:
+            draw_controls_menu()
+        elif current_state == GAME_STATES["REBINDING_KEY"]:
+            draw_controls_menu() # Keep drawing the controls menu
+        elif current_state == GAME_STATES["PAUSED"]:
+            draw_game() # Draw the game screen first
+            draw_pause_menu() # Then draw the overlay on top
+        elif current_state == GAME_STATES["GAME"]:
+            # Player input
+            keys_pressed = pygame.key.get_pressed()
+            dx, dy = 0, 0
+            
+            # Check for sprinting key and sufficient stamina
+            if keys_pressed[KEY_BINDINGS["sprint"]] and player.stamina > 0:
+                player.is_sprinting = True
+            else:
+                player.is_sprinting = False
+
+            # Check for movement using both WASD and arrow keys
+            if keys_pressed[KEY_BINDINGS["move_up"]] or keys_pressed[pygame.K_UP]:
+                dy -= 1
+            if keys_pressed[KEY_BINDINGS["move_down"]] or keys_pressed[pygame.K_DOWN]:
+                dy += 1
+            if keys_pressed[KEY_BINDINGS["move_left"]] or keys_pressed[pygame.K_LEFT]:
+                dx -= 1
+            if keys_pressed[KEY_BINDINGS["move_right"]] or keys_pressed[pygame.K_RIGHT]:
+                dx += 1
+
+            player.update(dx, dy, walls, doors)
+
+            # Update enemies and NPCs
+            enemies.update()
+            npcs.update()
+
+            # Check for enemy collision with player
+            if player.invulnerable_timer == 0:
+                enemy_collision = pygame.sprite.spritecollideany(player, enemies)
+                if enemy_collision:
+                    player.life_points -= 20
+                    damage_sound.play()
+                    player.invulnerable_timer = 60 # Set a 60-frame invulnerability period
+                    if player.life_points <= 0:
+                        game_over_sound.play()
+                        current_state = GAME_STATES["GAME_OVER"]
+            
+            # Check for door transition
+            for door in doors:
+                if not door.locked and player.rect.colliderect(door.rect):
+                    level_up_sound.play()
+                    current_level += 1
+                    current_dungeon_data = generate_dungeon(current_level)
+                    load_map(current_dungeon_data)
+
+            # Draw everything
+            draw_game()
+
+        elif current_state == GAME_STATES["DIALOGUE"]:
+            draw_game()
+            draw_dialogue(active_dialogue)
         
-        # Draw all sprites including barriers
-        all_sprites.draw(screen)
-        
-        # Draw the particles after all sprites
-        for particle in particles:
-            particle.draw(screen)
+        elif current_state == GAME_STATES["GAME_OVER"]:
+            draw_game_over()
 
-        # Display score and health
-        score_text = font.render(f'Score: {score}', True, WHITE)
-        screen.blit(score_text, (10, 10))
-        
-        # Display weapon name
-        weapon_name = player.current_weapon.replace('_', ' ').title()
-        weapon_surf = font.render(f'Weapon: {weapon_name}', True, WHITE)
-        screen.blit(weapon_surf, (10, 80))
-
-        # Health bar drawing
-        # Determine health bar color based on current health
-        if player.health > 75:
-            health_color = GREEN
-        elif player.health > 50:
-            health_color = (255, 255, 0) # Yellow
-        elif player.health > 25:
-            health_color = (255, 165, 0) # Orange
-        else:
-            health_color = RED
-
-        # Draw the background for the health bar
-        health_bar_rect_bg = pygame.Rect(10, 50, 150, 20)
-        pygame.draw.rect(screen, (50, 50, 50), health_bar_rect_bg, border_radius=5)
-
-        # Calculate the width of the health bar
-        health_bar_width = (player.health / player.max_health) * 150
-        health_bar_rect = pygame.Rect(10, 50, health_bar_width, 20)
-        pygame.draw.rect(screen, health_color, health_bar_rect, border_radius=5)
-        
-        if is_game_over:
-            # Return final score to main loop
-            return score
-        
-        # If the game is paused, display the pause menu
-        if is_paused:
-            action = show_pause_menu()
-            if action == "resume":
-                is_paused = False
-            elif action == "start_menu":
-                return "start_menu"
-
+        # Update the display
         pygame.display.flip()
-
-        # --- Frame Rate Control ---
+        
+        # Cap the frame rate
         clock.tick(60)
 
-    # This part is technically unreachable in this version, but good practice
-    return score
+    pygame.quit()
+    sys.exit()
 
-# --- Main Program Entry ---
 if __name__ == "__main__":
-    current_screen = "start_menu"
-    while True:
-        if current_screen == "start_menu":
-            action = show_start_menu()
-            if action == "new_game":
-                current_screen = "game"
-            elif action == "options_menu":
-                current_screen = "options"
-        elif current_screen == "options":
-            action = show_options_menu()
-            if action == "start_menu":
-                current_screen = "start_menu"
-            elif action == "audio_menu":
-                current_screen = "audio"
-            elif action == "controls_menu":
-                current_screen = "controls"
-        elif current_screen == "audio":
-            action = show_audio_menu()
-            if action == "options_menu":
-                current_screen = "options"
-        elif current_screen == "controls":
-            action = show_controls_menu()
-            if action == "options_menu":
-                current_screen = "options"
-        elif current_screen == "game":
-            result = main_game_loop()
-            if result == "start_menu":
-                current_screen = "start_menu"
-            else:
-                final_score = result
-                current_screen = show_game_over_screen(final_score)
+    main()
