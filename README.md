@@ -1,2 +1,2 @@
-# GhostDungeon
-Ghost Dungeon - a prototype RPG
+# GhostMaze
+Ghost Maze - a small maze RPG
