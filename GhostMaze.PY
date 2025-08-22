@@ -232,6 +232,32 @@ def generate_enemy_hit_sound():
     sound_data_int16 = (sound_data * 32767).astype(np.int16)
     return pygame.mixer.Sound(sound_data_int16.tobytes())
 
+def generate_menu_melody():
+    """Generates a simple low-bass melody loop for menus."""
+    sample_rate = 44100
+    bpm = 100
+    note_duration = 60 / bpm
+    
+    # A simple, low bassline (A2, G2, C2, E2)
+    notes = [110.0, 98.0, 65.4, 82.4] 
+    
+    melody_data = []
+    
+    for freq in notes:
+        t = np.linspace(0., note_duration, int(sample_rate * note_duration), False)
+        # Create a sine wave with a decay envelope to sound like a bass pluck
+        note_data = 0.3 * np.sin(2 * np.pi * freq * t) * np.exp(-t * 5)
+        melody_data.append(note_data)
+        
+    # Concatenate all note data into one array
+    full_melody_data = np.concatenate(melody_data)
+    
+    # Scale to 16-bit integer format and convert to bytes
+    sound_data_int16 = (full_melody_data * 32767).astype(np.int16)
+    
+    # Create the Pygame Sound object
+    return pygame.mixer.Sound(sound_data_int16.tobytes())
+
 # Generate the sounds once at the start
 unlock_sound = generate_unlock_sound()
 damage_sound = generate_damage_sound()
@@ -242,6 +268,7 @@ level_up_sound = generate_level_up_sound()
 footstep_sound = generate_footstep_sound()
 sword_swing_sound = generate_sword_swing_sound()
 enemy_hit_sound = generate_enemy_hit_sound()
+menu_melody_sound = generate_menu_melody()
 
 # --- Sound Player Helper ---
 def play_sound(sound):
@@ -319,7 +346,8 @@ class Player(pygame.sprite.Sprite):
         self.inventory = [] # New list to store collected power-ups
         
         # New stamina system attributes
-        self.max_stamina = 100
+        self.base_stamina = 100
+        self.max_stamina = self.base_stamina
         self.stamina = self.max_stamina
         self.stamina_drain_rate = 1.5 # How much stamina is lost per frame while sprinting
         self.stamina_recharge_rate = 1 # How much stamina is gained per frame when not sprinting
@@ -1376,7 +1404,31 @@ def main():
     # Store the last unmuted volume level
     last_volume = music_volume
     
+    # Define which states are considered 'menu' states
+    menu_states = [
+        GAME_STATES["MENU"],
+        GAME_STATES["OPTIONS"],
+        GAME_STATES["AUDIO_OPTIONS"],
+        GAME_STATES["CONTROLS_OPTIONS"],
+        GAME_STATES["REBINDING_KEY"],
+        GAME_STATES["LEADERBOARD"]
+    ]
+    
     while running:
+        # --- Menu Melody Logic ---
+        if current_state in menu_states:
+            if not is_muted:
+                # Set volume and play if not already playing
+                pygame.mixer.Channel(1).set_volume(music_volume)
+                if not pygame.mixer.Channel(1).get_busy():
+                    pygame.mixer.Channel(1).play(menu_melody_sound, -1) # Loop indefinitely
+            else:
+                # Stop the music if muted
+                pygame.mixer.Channel(1).stop()
+        else:
+            # If not in a menu state, stop the melody
+            pygame.mixer.Channel(1).stop()
+
         # Event handling
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -1728,7 +1780,9 @@ def main():
             if player_score >= player_level * LEVEL_UP_THRESHOLD:
                 player_level += 1
                 player.max_life_points += 25  # Increase max HP
+                player.max_stamina += 10 # Increase max stamina
                 player.life_points = player.max_life_points  # Fully heal on level up
+                player.stamina = player.max_stamina # Refill stamina
                 play_sound(level_up_sound)
 
             # Draw everything
