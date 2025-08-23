@@ -634,6 +634,14 @@ def _generate_maze_dungeon(width, height):
             
             stack.append((next_x, next_y))
             
+    # Explicitly set the border to be walls to ensure a contained maze.
+    for y in range(height):
+        layout[y][0] = 1  # Left edge
+        layout[y][width - 1] = 1  # Right edge
+    for x in range(width):
+        layout[0][x] = 1  # Top edge
+        layout[height - 1][x] = 1  # Bottom edge
+            
     return layout
 
 def _create_open_spaces(layout, width, height, num_spaces=3, min_size=3, max_size=6):
