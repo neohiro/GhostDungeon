@@ -1626,7 +1626,7 @@ def main():
                         # 1. NPC interaction has the highest priority.
                         if collided_npc:
                             player.life_points = min(player.max_life_points, player.life_points + 20)
-                            active_dialogue = f"{collided_npc.dialogue}"
+                            active_dialogue = f"{collided_npc.dialogue} You feel better. HP is now {player.life_points}/{player.max_life_points}."
                             current_state = GAME_STATES["DIALOGUE"]
                             play_sound(dialogue_sound)
                         
@@ -1645,7 +1645,7 @@ def main():
                             if power_up_to_collect.type == "heal":
                                 player.life_points = min(player.max_life_points, player.life_points + 50)
                                 player_score += 50
-                                active_dialogue = f"You used a healing potion! Your life is now {player.life_points}."
+                                active_dialogue = f"You used a healing potion! HP restored to {player.life_points}/{player.max_life_points}."
                             elif power_up_to_collect.type == "enemy_bomb":
                                 player_score += 75
                                 enemies.empty()
