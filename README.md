@@ -1,6 +1,7 @@
 # GhostMaze
 Ghost Maze - a small maze RPG
 
+<img width="911" height="657" alt="image" src="https://github.com/user-attachments/assets/ad3d7917-9ab0-4b27-90aa-9df5e614c22e" />
 
 The Ghost Maze of the Forsaken King
 Welcome, Brave Adventurer!
