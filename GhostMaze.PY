@@ -34,7 +34,13 @@ PLAYER_COLOR = (255, 0, 0)
 NPC_COLOR = (0, 0, 255)
 ENEMY_COLOR = (200, 50, 50) # Red color for enemies
 ENEMY_HIT_COLOR = (255, 255, 255) # NEW: White flash when enemy is hit
-SWORD_COLOR = (192, 192, 192) # NEW: Silver for the sword
+BOSS_COLOR = (240, 240, 240) # NEW: Ghostly white for the boss
+BASE_ENEMY_DAMAGE = 15 # NEW: Base damage inflicted by enemies
+BOSS_DAMAGE = 40 # NEW: Damage inflicted by the boss
+DAMAGE_SCALING_PER_LEVEL = 5 # NEW: Extra damage per player level
+HAMMER_HEAD_COLOR = (192, 192, 192) # NEW: Silver for the hammer head
+HAMMER_HANDLE_COLOR = (139, 69, 19) # NEW: Brown for the hammer handle
+FOOTSTEP_COLOR = (30, 30, 30) # NEW: Color for footsteps
 TORCH_COLOR = (255, 255, 0)
 DOOR_COLOR = (139, 69, 19) # SaddleBrown for the door
 KEY_COLOR = (255, 215, 0) # Gold for the key
@@ -47,6 +53,7 @@ STAMINA_BAR_BG_COLOR = (25, 25, 25) # Dark gray
 FOG_CLEAR_COLOR = (128, 0, 128) # Purple
 ENEMY_BOMB_COLOR = (255, 255, 255) # White
 HEAL_COLOR = (0, 255, 0) # Green
+CYAN_COLOR = (0, 255, 255) # NEW: For level up effect
 
 # --- Game States ---
 GAME_STATES = {
@@ -100,20 +107,23 @@ rebind_target = None
 # NEW: Define a list of story events that occur at specific levels
 STORY_EVENTS = {
     1: ("You awaken in a dark dungeon, a forgotten hero. Your mission: find the lost artifacts of power to save the kingdom from an ancient evil. You must venture through the dungeons to find them.",
-        "Use '" + pygame.key.name(KEY_BINDINGS["move_up"]).upper() + "', '" + pygame.key.name(KEY_BINDINGS["move_left"]).upper() + "', '" + pygame.key.name(KEY_BINDINGS["move_down"]).upper() + "', '" + pygame.key.name(KEY_BINDINGS["move_right"]).upper() + "' or arrow keys to move, '" + pygame.key.name(KEY_BINDINGS["sprint"]).upper() + "' to sprint, and '" + pygame.key.name(KEY_BINDINGS["interact"]).upper() + "' to interact with objects and characters."),
-    3: ("A strange glow emanates from a distant room. You feel a surge of energy. Could one of the artifacts be near?", ""),
-    5: ("The path ahead is guarded by a powerful enemy. You'll need all your wits and strength to overcome this challenge. The final artifact is within your grasp!", ""),
-    6: ("This seems to never end... the challenge is one that continues. Find all artifacts and stay alive!", "")
+        "Use '" + pygame.key.name(KEY_BINDINGS["move_up"]).upper() + "', '" + pygame.key.name(KEY_BINDINGS["move_left"]).upper() + "', '" + pygame.key.name(KEY_BINDINGS["move_down"]).upper() + "', '" + pygame.key.name(KEY_BINDINGS["move_right"]).upper() + "' or arrow keys to move, '" + pygame.key.name(KEY_BINDINGS["sprint"]).upper() + "' to sprint, and '" + pygame.key.name(KEY_BINDINGS["interact"]).upper() + "' to interact with objects and characters, slash enemies and break through walls."),
+    2: ("A strange glow emanates from a distant room. You feel a surge of energy. Could one of the artifacts be near?", "Hammer through walls to make life easier."),
+    4: ("The path ahead is guarded by a powerful enemy. You'll need all your wits and strength to overcome this challenge. The artifacts are within your grasp!", "Defeat the boss to unlock the door."),
+    6: ("This seems to never end... the challenge is one that continues. Find all artifacts and stay alive!", "Powerups and NPCs are there to help!"),
+    8: ("The path ahead is guarded by a powerful enemy. You'll need all your wits and strength to overcome this challenge. The artifacts are within your grasp!", "Defeat the boss to unlock the door."),
+    12: ("A strange glow emanates from a distant room. You feel a surge of energy. Could one of the artifacts be near?", "Defeat the boss to unlock the door."),
+    16: ("A strange glow emanates from a distant room. You feel a surge of energy. Could one of the artifacts be near? Or another enemy?", "Defeat the boss to unlock the door.")
 }
 
 
 # NEW: Define the NPC dialogue list
 NPC_DIALOGUES = [
-    "I have been waiting for someone like you! A key is needed to open the door, and I can help you with some of your life points.",
-    "The way forward is locked, but a key is hidden somewhere in this labyrinth. Interacting with me will also heal you a bit.",
-    "Only those with a key may pass. I can't come with you, but I can restore your vitality.",
-    "A locked door blocks your path. You must find a key to unlock it. I can feel your strength returning just by talking to me.",
-    "Be careful, the key is guarded! But don't worry, I'll patch you up if you get hurt."
+    "I have been waiting for someone like you! Good you brought a hammer. A key is needed to open the magic door, and I can help you with some of your life points.",
+    "The way forward is magically locked, but a key is hidden somewhere in this labyrinth. Interacting with me will also heal you a bit.",
+    "Only those with a magic key may pass. I can't come with you, but I can restore your vitality.",
+    "A locked magic door blocks your path. You must find a key to unlock it. I can feel your strength returning just by talking to me.",
+    "Be careful, the magic key is guarded! But don't worry, I'll patch you up if you get hurt."
 ]
 
 # --- Audio Settings ---
@@ -208,8 +218,8 @@ def generate_footstep_sound():
     sound_data_int16 = (sound_data * 32767).astype(np.int16)
     return pygame.mixer.Sound(sound_data_int16.tobytes())
 
-def generate_sword_swing_sound():
-    """Generates a 'swoosh' sound for the sword swing."""
+def generate_hammer_swing_sound():
+    """Generates a 'swoosh' sound for the hammer swing."""
     sample_rate = 44100
     duration = 0.2
     t = np.linspace(0., duration, int(sample_rate * duration), False)
@@ -229,6 +239,32 @@ def generate_enemy_hit_sound():
     t = np.linspace(0., duration, int(sample_rate * duration), False)
     # A decaying sine wave to make a 'hit' sound
     sound_data = 0.4 * np.sin(2 * np.pi * frequency * t) * np.exp(-t * 50)
+    sound_data_int16 = (sound_data * 32767).astype(np.int16)
+    return pygame.mixer.Sound(sound_data_int16.tobytes())
+
+def generate_wall_destroy_sound():
+    """Generates a crumbling/crashing sound for wall destruction."""
+    sample_rate = 44100
+    duration = 0.5
+    t = np.linspace(0., duration, int(sample_rate * duration), False)
+    
+    # Generate white noise for the crumble/static effect
+    noise = np.random.uniform(-1, 1, len(t))
+    
+    # Create a decay envelope to make it sound like an impact that fades
+    envelope = np.exp(-t * 15)
+    
+    # Generate a low-frequency rumble to add weight to the sound
+    rumble = 0.5 * np.sin(2 * np.pi * 60 * t) # A 60Hz rumble
+    
+    # Combine the sounds: mix the noise and rumble, then shape with the envelope
+    sound_data = (noise * 0.5 + rumble) * envelope
+    
+    # Normalize the audio to prevent clipping (volume too loud)
+    if np.max(np.abs(sound_data)) > 0:
+        sound_data /= np.max(np.abs(sound_data))
+    
+    # Scale to 16-bit integer format for Pygame
     sound_data_int16 = (sound_data * 32767).astype(np.int16)
     return pygame.mixer.Sound(sound_data_int16.tobytes())
 
@@ -266,8 +302,9 @@ dialogue_sound = generate_dialogue_sound()
 game_over_sound = generate_game_over_sound()
 level_up_sound = generate_level_up_sound()
 footstep_sound = generate_footstep_sound()
-sword_swing_sound = generate_sword_swing_sound()
+hammer_swing_sound = generate_hammer_swing_sound()
 enemy_hit_sound = generate_enemy_hit_sound()
+wall_destroy_sound = generate_wall_destroy_sound() # NEW: Wall destruction sound
 menu_melody_sound = generate_menu_melody()
 
 # --- Sound Player Helper ---
@@ -280,13 +317,82 @@ def play_sound(sound):
 
 # --- Game Classes ---
 
-class Sword(pygame.sprite.Sprite):
-    """Represents the player's sword."""
+class Footstep(pygame.sprite.Sprite):
+    """A single fading footstep particle."""
+    def __init__(self, x, y):
+        super().__init__()
+        self.size = PLAYER_SIZE // 4
+        self.image = pygame.Surface((self.size, self.size), pygame.SRCALPHA)
+        self.image.fill(FOOTSTEP_COLOR)
+        self.rect = self.image.get_rect(center=(x, y))
+        self.lifespan = 60  # Lasts for 1 second at 60 FPS
+        self.initial_lifespan = 60
+
+    def update(self):
+        """Fades the footstep out and then removes it."""
+        self.lifespan -= 1
+        if self.lifespan <= 0:
+            self.kill()
+            return
+        
+        # Calculate new alpha based on remaining lifespan
+        alpha = int(255 * (self.lifespan / self.initial_lifespan))
+        self.image.set_alpha(alpha)
+
+
+class Particle(pygame.sprite.Sprite):
+    """A single particle for special effects."""
+    def __init__(self, x, y, color, particle_type):
+        super().__init__()
+        self.x = x
+        self.y = y
+        self.color = color
+        self.type = particle_type
+
+        if self.type == 'explosion':
+            self.size = random.randint(2, 6)
+            self.vx = random.uniform(-3, 3)
+            self.vy = random.uniform(-3, 3)
+            self.lifespan = random.randint(20, 40)
+        elif self.type == 'healing':
+            self.size = random.randint(4, 8)
+            self.vx = random.uniform(-1, 1)
+            self.vy = random.uniform(-2, -0.5) # Move upwards
+            self.lifespan = random.randint(30, 50)
+
+        self.image = pygame.Surface((self.size * 2, self.size * 2), pygame.SRCALPHA)
+        self.image.fill(self.color)
+        self.rect = self.image.get_rect(center=(self.x, self.y))
+        
+    def update(self):
+        """Updates the particle's position and lifespan."""
+        self.lifespan -= 1
+        if self.lifespan <= 0:
+            self.kill()
+            return
+
+        self.x += self.vx
+        self.y += self.vy
+        self.rect.center = (self.x, self.y)
+
+        # Fade out effect for the last 20 frames of life
+        if self.lifespan < 20:
+            alpha = int(255 * (self.lifespan / 20))
+            self.image.set_alpha(alpha)
+
+class Hammer(pygame.sprite.Sprite):
+    """Represents the player's hammer."""
     def __init__(self, player):
         super().__init__()
         self.player = player
-        self.original_image = pygame.Surface((PLAYER_SIZE // 2, PLAYER_SIZE * 1.5), pygame.SRCALPHA)
-        self.original_image.fill(SWORD_COLOR)
+        
+        # Create the hammer image
+        self.original_image = pygame.Surface((PLAYER_SIZE, PLAYER_SIZE * 2), pygame.SRCALPHA)
+        handle_rect = pygame.Rect(PLAYER_SIZE * 0.4, PLAYER_SIZE * 0.5, PLAYER_SIZE * 0.2, PLAYER_SIZE * 1.5)
+        head_rect = pygame.Rect(0, 0, PLAYER_SIZE, PLAYER_SIZE * 0.5)
+        pygame.draw.rect(self.original_image, HAMMER_HANDLE_COLOR, handle_rect)
+        pygame.draw.rect(self.original_image, HAMMER_HEAD_COLOR, head_rect)
+        
         self.image = self.original_image
         self.rect = self.image.get_rect(midbottom=self.player.rect.center)
         
@@ -297,7 +403,7 @@ class Sword(pygame.sprite.Sprite):
         self.swing_speed = 12 # degrees per frame
 
     def update(self):
-        """Updates the sword's position and rotation."""
+        """Updates the hammer's position and rotation."""
         if self.swinging:
             self.swing_timer -= 1
             if self.swing_timer <= 0:
@@ -310,18 +416,18 @@ class Sword(pygame.sprite.Sprite):
             # When not swinging, keep it pointed in the player's direction
             self.swing_angle = self.player.direction.angle_to(pygame.math.Vector2(0, -1))
 
-        # Rotate the sword
+        # Rotate the hammer
         self.image = pygame.transform.rotate(self.original_image, self.swing_angle)
         
-        # Position the sword relative to the player
-        # The offset vector moves the sword out in front of the player
+        # Position the hammer relative to the player
+        # The offset vector moves the hammer out in front of the player
         offset = self.player.direction.normalize() * (PLAYER_SIZE * 0.75)
         self.rect = self.image.get_rect(center=self.player.rect.center + offset)
 
     def swing(self):
-        """Initiates a sword swing."""
+        """Initiates a hammer swing."""
         if not self.swinging:
-            play_sound(sword_swing_sound)
+            play_sound(hammer_swing_sound)
             self.swinging = True
             self.swing_timer = self.swing_duration
             # Start the swing from an offset angle based on player direction
@@ -353,9 +459,9 @@ class Player(pygame.sprite.Sprite):
         self.stamina_recharge_rate = 1 # How much stamina is gained per frame when not sprinting
         self.is_sprinting = False
 
-        # NEW: Player direction and sword
+        # NEW: Player direction and hammer
         self.direction = pygame.math.Vector2(0, -1) # Default facing up
-        self.sword = Sword(self)
+        self.hammer = Hammer(self)
 
     def update(self, dx, dy, walls, doors):
         """
@@ -393,12 +499,13 @@ class Player(pygame.sprite.Sprite):
         self.rect.x += new_dx
 
         # Check for collision with walls and locked doors after x-movement
-        for wall in walls:
-            if self.rect.colliderect(wall):
+        for wall_dict in walls:
+            wall_rect = wall_dict['rect']
+            if self.rect.colliderect(wall_rect):
                 if new_dx > 0: # Moving right
-                    self.rect.right = wall.left
+                    self.rect.right = wall_rect.left
                 if new_dx < 0: # Moving left
-                    self.rect.left = wall.right
+                    self.rect.left = wall_rect.right
         for door in doors:
             if door.locked and self.rect.colliderect(door.rect):
                 if new_dx > 0:
@@ -410,12 +517,13 @@ class Player(pygame.sprite.Sprite):
         self.rect.y += new_dy
 
         # Check for collision with walls and locked doors after y-movement
-        for wall in walls:
-            if self.rect.colliderect(wall):
+        for wall_dict in walls:
+            wall_rect = wall_dict['rect']
+            if self.rect.colliderect(wall_rect):
                 if new_dy > 0: # Moving down
-                    self.rect.bottom = wall.top
+                    self.rect.bottom = wall_rect.top
                 if new_dy < 0: # Moving up
-                    self.rect.top = wall.bottom
+                    self.rect.top = wall_rect.bottom
         for door in doors:
             if door.locked and self.rect.colliderect(door.rect):
                 if new_dy > 0:
@@ -441,8 +549,8 @@ class Player(pygame.sprite.Sprite):
         else:
             self.image.fill(PLAYER_COLOR)
 
-        # NEW: Update the sword's state
-        self.sword.update()
+        # NEW: Update the hammer's state
+        self.hammer.update()
 
 
 class NPC(pygame.sprite.Sprite):
@@ -493,7 +601,7 @@ class Key(pygame.sprite.Sprite):
         self.rect = self.image.get_rect(topleft=(x, y))
 
 class Enemy(pygame.sprite.Sprite):
-    """Represents a moving enemy."""
+    """Represents a moving enemy with smarter AI."""
     def __init__(self, x, y, patrol_range, speed):
         super().__init__()
         self.image = pygame.Surface((TILE_SIZE, TILE_SIZE))
@@ -511,10 +619,13 @@ class Enemy(pygame.sprite.Sprite):
         self.move_direction_x = random.choice([-1, 1])
         self.move_direction_y = random.choice([-1, 1])
         
-        # NEW: Enemy health and state
+        # Enemy health and state
         self.max_life_points = 3
         self.life_points = self.max_life_points
         self.invulnerable_timer = 0
+        
+        # NEW: AI properties
+        self.aggro_radius = TILE_SIZE * 3 # The distance at which the enemy will start chasing the player
 
     def take_damage(self, amount):
         """Reduces the enemy's life points if not invulnerable."""
@@ -523,22 +634,39 @@ class Enemy(pygame.sprite.Sprite):
             play_sound(enemy_hit_sound)
             self.invulnerable_timer = 30 # 30 frames of invulnerability
             
-    def update(self):
-        """Update the enemy's position within its patrol area."""
-        self.rect.x += self.speed * self.move_direction_x
-        self.rect.y += self.speed * self.move_direction_y
-        
-        # Reverse direction if hitting horizontal boundaries
-        if self.rect.x >= self.patrol_end_x or self.rect.x <= self.patrol_start_x:
-            self.move_direction_x *= -1
-            self.rect.x = max(self.patrol_start_x, min(self.rect.x, self.patrol_end_x))
+    def update(self, player):
+        """
+        Update the enemy's position. It will patrol its area until the player
+        gets close, at which point it will chase the player.
+        """
+        player_pos = pygame.math.Vector2(player.rect.center)
+        enemy_pos = pygame.math.Vector2(self.rect.center)
+        distance_to_player = player_pos.distance_to(enemy_pos)
 
-        # Reverse direction if hitting vertical boundaries
-        if self.rect.y >= self.patrol_end_y or self.rect.y <= self.patrol_start_y:
-            self.move_direction_y *= -1
-            self.rect.y = max(self.patrol_start_y, min(self.rect.y, self.patrol_end_y))
+        # --- AI Logic: Chase or Patrol ---
+        if distance_to_player < self.aggro_radius:
+            # CHASE MODE: Move towards the player
+            # **BUG FIX**: Only normalize if the distance is greater than zero
+            if distance_to_player > 0:
+                direction = (player_pos - enemy_pos).normalize()
+                self.rect.x += direction.x * self.speed
+                self.rect.y += direction.y * self.speed
+        else:
+            # PATROL MODE: Move within the defined patrol area
+            self.rect.x += self.speed * self.move_direction_x
+            self.rect.y += self.speed * self.move_direction_y
             
-        # NEW: Update invulnerability and flashing
+            # Reverse direction if hitting horizontal boundaries
+            if self.rect.x >= self.patrol_end_x or self.rect.x <= self.patrol_start_x:
+                self.move_direction_x *= -1
+                self.rect.x = max(self.patrol_start_x, min(self.rect.x, self.patrol_end_x))
+
+            # Reverse direction if hitting vertical boundaries
+            if self.rect.y >= self.patrol_end_y or self.rect.y <= self.patrol_start_y:
+                self.move_direction_y *= -1
+                self.rect.y = max(self.patrol_start_y, min(self.rect.y, self.patrol_end_y))
+            
+        # Update invulnerability and flashing
         if self.invulnerable_timer > 0:
             self.invulnerable_timer -= 1
             # Flash the enemy to indicate being hit
@@ -548,6 +676,50 @@ class Enemy(pygame.sprite.Sprite):
                 self.image.fill(ENEMY_COLOR)
         else:
             self.image.fill(ENEMY_COLOR)
+
+class Boss(pygame.sprite.Sprite):
+    """Represents a powerful boss enemy."""
+    def __init__(self, x, y):
+        super().__init__()
+        self.original_size = TILE_SIZE * 2
+        self.image = pygame.Surface((self.original_size, self.original_size))
+        self.image.fill(BOSS_COLOR)
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.speed = 2.1 # Slower but relentless
+        self.max_life_points = 7
+        self.life_points = self.max_life_points
+        self.invulnerable_timer = 0
+        self.damage = BOSS_DAMAGE
+
+    def take_damage(self, amount):
+        """Reduces the boss's life points if not invulnerable."""
+        if self.invulnerable_timer == 0:
+            self.life_points -= amount
+            play_sound(enemy_hit_sound) # Reuse hit sound
+            self.invulnerable_timer = 30 # 0.5 seconds of invulnerability
+
+    def update(self, player):
+        """The boss always chases the player."""
+        player_pos = pygame.math.Vector2(player.rect.center)
+        boss_pos = pygame.math.Vector2(self.rect.center)
+        distance_to_player = player_pos.distance_to(boss_pos)
+
+        # Always chase the player
+        if distance_to_player > 0:
+            direction = (player_pos - boss_pos).normalize()
+            self.rect.x += direction.x * self.speed
+            self.rect.y += direction.y * self.speed
+
+        # Update invulnerability and flashing
+        if self.invulnerable_timer > 0:
+            self.invulnerable_timer -= 1
+            # Flash the boss to indicate being hit
+            if self.invulnerable_timer % 10 < 5:
+                self.image.fill(ENEMY_HIT_COLOR)
+            else:
+                self.image.fill(BOSS_COLOR)
+        else:
+            self.image.fill(BOSS_COLOR)
             
 class Torch(pygame.sprite.Sprite):
     """Represents a static torch light source."""
@@ -565,6 +737,13 @@ class PowerUp(pygame.sprite.Sprite):
         self.image.fill(color)
         self.rect = self.image.get_rect(topleft=(x, y))
         self.type = type
+
+# --- Particle Emitter ---
+def create_particles(x, y, color, count, particle_type):
+    """Spawns a number of particles at a given position."""
+    for _ in range(count):
+        particle = Particle(x, y, color, particle_type)
+        particle_group.add(particle)
 
 # --- Dungeon Generation ---
 def _is_valid_spawn_pos(x, y, layout, padding=1):
@@ -593,7 +772,11 @@ def _generate_simple_dungeon(width, height):
     return layout
 
 def _generate_maze_dungeon(width, height):
-    """Generates a maze using a simplified randomized depth-first search (DFS)."""
+    """
+    Generates a maze using a simplified randomized depth-first search (DFS).
+    This algorithm inherently creates a "perfect" maze, which means it is
+    fully interconnected with no loops or inaccessible areas.
+    """
     # Initialize the grid with walls everywhere
     layout = [[1 for _ in range(width)] for _ in range(height)]
     stack = []
@@ -648,149 +831,158 @@ def _create_open_spaces(layout, width, height, num_spaces=3, min_size=3, max_siz
     """
     Randomly carves out large, open spaces within the maze.
     This helps break up the winding paths and creates more open areas.
+    By anchoring new rooms to existing floor tiles, this function ensures
+    that all carved rooms are connected to the main maze path, preventing
+    the creation of unreachable areas.
     """
     for _ in range(num_spaces):
-        # Choose a random size for the open space
+        # Find all floor tiles to ensure the new room connects to an existing path.
+        floor_tiles = []
+        for y in range(1, height - 1):
+            for x in range(1, width - 1):
+                if layout[y][x] == 0:
+                    floor_tiles.append((x, y))
+        
+        # If there's no floor to connect to, we can't add a room.
+        if not floor_tiles:
+            return
+
+        # Choose a random size for the new room
         space_width = random.randint(min_size, max_size)
         space_height = random.randint(min_size, max_size)
 
-        # Choose a random starting position for the open space
-        # Ensure it fits within the boundaries with a margin of 1 tile from the edge
-        x_start = random.randint(1, width - space_width - 1)
-        y_start = random.randint(1, height - space_height - 1)
+        # Pick a random existing floor tile as an "anchor"
+        anchor_x, anchor_y = random.choice(floor_tiles)
         
-        # Carve out the open area
+        # Determine the top-left corner of the new room so that it overlaps
+        # with the anchor tile. This guarantees connectivity.
+        x_start = random.randint(anchor_x - space_width + 1, anchor_x)
+        y_start = random.randint(anchor_y - space_height + 1, anchor_y)
+        
+        # Clamp the coordinates to ensure the room stays within the dungeon boundaries.
+        x_start = max(1, x_start)
+        y_start = max(1, y_start)
+        x_start = min(x_start, width - space_width - 1)
+        y_start = min(y_start, height - space_height - 1)
+
+        # Carve out the room area by setting tiles to 0 (floor).
         for y in range(y_start, y_start + space_height):
             for x in range(x_start, x_start + space_width):
-                layout[y][x] = 0 # Set to floor
-
-# New dialogue list for the NPC
-NPC_DIALOGUES = [
-    "I have been waiting for someone like you! A key is needed to open the door, and I can help you with some of your life points.",
-    "The way forward is locked, but a key is hidden somewhere in this labyrinth. Interacting with me will also heal you a bit.",
-    "Only those with a key may pass. I can't come with you, but I can restore your vitality.",
-    "A locked door blocks your path. You must find a key to unlock it. I can feel your strength returning just by talking to me.",
-    "Be careful, the key is guarded! But don't worry, I'll patch you up if you get hurt."
-]
+                # Final check to stay within the inner walls
+                if 1 <= x < width - 1 and 1 <= y < height - 1:
+                    layout[y][x] = 0
 
 def generate_dungeon(level):
     """Generates a full dungeon with all objects based on the level."""
-    # Use pre-defined tile counts to ensure a perfect fit
     width = HORIZONTAL_TILES
     height = VERTICAL_TILES
+
+    # Check if it's a boss level
+    is_boss_level = (level % 4 == 0) and level > 0
 
     if level == 1:
         layout = _generate_simple_dungeon(width, height)
     else:
-        # Increase complexity by creating a maze
         layout = _generate_maze_dungeon(width, height)
-        # Add open spaces to the maze layout
         _create_open_spaces(layout, width, height)
-    
-    # Find all floor tiles to place items on
-    floor_tiles = []
-    for y in range(1, height - 1):
-        for x in range(1, width - 1):
-            if layout[y][x] == 0:
-                floor_tiles.append((x, y))
 
-    # Place player spawn at a random floor tile, with a buffer from the edges
-    # NEW: Filter floor tiles to ensure player doesn't spawn too close to the edges
-    safe_floor_tiles = [(x, y) for x, y in floor_tiles if 
-                        x > 2 and x < width - 3 and 
-                        y > 2 and y < height - 3]
-    
-    player_spawn_pos = random.choice(safe_floor_tiles) if safe_floor_tiles else random.choice(floor_tiles)
-    floor_tiles.remove(player_spawn_pos)
+    floor_tiles = [(x, y) for y in range(1, height - 1) for x in range(1, width - 1) if layout[y][x] == 0]
 
-    # Place key and NPC at random floor tiles
-    key_pos = random.choice(floor_tiles)
-    floor_tiles.remove(key_pos)
-    
-    npc_pos = random.choice(floor_tiles)
-    floor_tiles.remove(npc_pos)
-    
-    # Select a random dialogue from the list
-    npc_dialogue = random.choice(NPC_DIALOGUES)
-
-    # Place power-ups
+    player_spawn_pos = None
+    npcs_to_spawn = []
+    keys_to_spawn = []
     power_ups_to_spawn = []
-    if floor_tiles:
-        heal_pos = random.choice(floor_tiles)
-        floor_tiles.remove(heal_pos)
-        power_ups_to_spawn.append({"pos": heal_pos, "type": "heal"})
-    if floor_tiles:
-        enemy_bomb_pos = random.choice(floor_tiles)
-        floor_tiles.remove(enemy_bomb_pos)
-        power_ups_to_spawn.append({"pos": enemy_bomb_pos, "type": "enemy_bomb"})
-    if floor_tiles:
-        fog_clear_pos = random.choice(floor_tiles)
-        floor_tiles.remove(fog_clear_pos)
-        power_ups_to_spawn.append({"pos": fog_clear_pos, "type": "fog_clear"})
-    
-    # Place enemies
-    # MODIFIED: Increased enemy count with each level
-    num_enemies = min(level * 2, len(floor_tiles))
-    
-    # NEW: Increase enemy patrol range and speed based on the level
-    base_patrol_range = 50
-    level_patrol_bonus = 25 * level # Increase range by 25 for each level
-    enemy_patrol_range = base_patrol_range + level_patrol_bonus
-
-    base_speed = 2
-    level_speed_bonus = 0.5 * level
-    enemy_speed = base_speed + level_speed_bonus
-
     enemies_to_spawn = []
+    torches_to_spawn = []
+    bosses_to_spawn = []
+
+    # --- UNIFIED SPAWNING LOGIC ---
+    # Determine how many unique positions we need for essential items.
+    # Regular level: player, key, npc, 3 power-ups = 6
+    # Boss level: player, npc, 3 power-ups, boss = 6
+    num_essential_items = 6
+
+    if len(floor_tiles) < num_essential_items:
+        chosen_positions = random.sample(floor_tiles, len(floor_tiles))
+    else:
+        chosen_positions = random.sample(floor_tiles, num_essential_items)
+
+    positions_to_assign = list(chosen_positions)
+    def get_pos():
+        return positions_to_assign.pop(0) if positions_to_assign else None
+
+    # Assign positions to all items
+    player_spawn_pos = get_pos()
+    npc_pos = get_pos()
+    heal_pos = get_pos()
+    enemy_bomb_pos = get_pos()
+    fog_clear_pos = get_pos()
+    
+    # The final essential item is either a key (on normal levels) or a boss
+    if is_boss_level:
+        key_pos = None
+        boss_pos = get_pos()
+    else:
+        key_pos = get_pos()
+        boss_pos = None
+
+    if player_spawn_pos is None:
+        player_spawn_pos = (width // 2, height // 2)
+
+    # Remove the used tiles from the available pool for other spawns
+    floor_tiles = [tile for tile in floor_tiles if tile not in chosen_positions]
+    
+    # Create the objects based on their assigned positions
+    if npc_pos: npcs_to_spawn.append({"pos": npc_pos, "dialogue": random.choice(NPC_DIALOGUES), "patrol_range": 20})
+    if key_pos: keys_to_spawn.append({"pos": key_pos})
+    if heal_pos: power_ups_to_spawn.append({"pos": heal_pos, "type": "heal"})
+    if enemy_bomb_pos: power_ups_to_spawn.append({"pos": enemy_bomb_pos, "type": "enemy_bomb"})
+    if fog_clear_pos: power_ups_to_spawn.append({"pos": fog_clear_pos, "type": "fog_clear"})
+    if boss_pos: bosses_to_spawn.append({"pos": boss_pos})
+
+    # Spawn enemies (now on all levels, including boss levels)
+    num_enemies = min(level * 2, len(floor_tiles))
+    enemy_patrol_range = 50 + 25 * level
+    enemy_speed = 2 + 0.5 * level
     for _ in range(num_enemies):
-        if not floor_tiles:
-            break
+        if not floor_tiles: break
         enemy_pos = random.choice(floor_tiles)
         floor_tiles.remove(enemy_pos)
         enemies_to_spawn.append({"pos": enemy_pos, "patrol_range": enemy_patrol_range, "speed": enemy_speed})
 
-    # Place torches
+    # Spawn torches (now on all levels, including boss levels)
     num_torches = 7
-    torches_to_spawn = []
     for _ in range(num_torches):
-        if not floor_tiles:
-            break
+        if not floor_tiles: break
         torch_pos = random.choice(floor_tiles)
         floor_tiles.remove(torch_pos)
         torches_to_spawn.append({"pos": torch_pos})
 
-    # Place door at a random wall tile
+    # --- Door Placement (remains the same) ---
     door_pos = None
-    wall_tiles = []
-    for y in range(height):
-        for x in range(width):
-            if layout[y][x] == 1 and (y == 0 or y == height - 1 or x == 0 or x == width - 1):
-                wall_tiles.append((x, y))
+    wall_tiles = [(x, y) for y in range(height) for x in range(width) if layout[y][x] == 1 and (y in [0, height-1] or x in [0, width-1])]
     
-    door_pos = random.choice(wall_tiles)
-    
-    # Carve a space for the door
+    if wall_tiles:
+        door_pos = random.choice(wall_tiles)
+    else:
+        door_pos = (width - 1, height // 2)
+
     layout[door_pos[1]][door_pos[0]] = 0
-    # To ensure the door is accessible, create a small path to it
-    if door_pos[1] == 0:
-        layout[1][door_pos[0]] = 0
-    elif door_pos[1] == height - 1:
-        layout[height - 2][door_pos[0]] = 0
-    elif door_pos[0] == 0:
-        layout[door_pos[1]][1] = 0
-    elif door_pos[0] == width - 1:
-        layout[door_pos[1]][width - 2] = 0
-    
+    if door_pos[1] == 0 and height > 1: layout[1][door_pos[0]] = 0
+    elif door_pos[1] == height - 1 and height > 1: layout[height - 2][door_pos[0]] = 0
+    elif door_pos[0] == 0 and width > 1: layout[door_pos[1]][1] = 0
+    elif door_pos[0] == width - 1 and width > 1: layout[door_pos[1]][width - 2] = 0
 
     return {
         "layout": layout,
-        "npcs": [{"pos": npc_pos, "dialogue": npc_dialogue, "patrol_range": 20}],
+        "npcs": npcs_to_spawn,
         "enemies": enemies_to_spawn,
         "torches": torches_to_spawn,
         "doors": [{"pos": door_pos, "locked": True}],
-        "keys": [{"pos": key_pos}],
+        "keys": keys_to_spawn,
         "power_ups": power_ups_to_spawn,
-        "player_spawn_pos": player_spawn_pos
+        "player_spawn_pos": player_spawn_pos,
+        "bosses": bosses_to_spawn
     }
 
 # NEW FOG OF WAR GLOBAL VARIABLES
@@ -802,7 +994,7 @@ visited_tiles = np.zeros((TILE_GRID_HEIGHT, TILE_GRID_WIDTH), dtype=bool)
 
 def load_map(map_data):
     """Loads a new map from the generated map data."""
-    global player, walls, npcs, torches, active_dialogue, keys, doors, enemies, visited_tiles, power_ups
+    global player, walls, npcs, torches, active_dialogue, keys, doors, enemies, bosses, visited_tiles, power_ups, particle_group, footstep_group
     
     # Reset game objects for the new map
     walls = []
@@ -811,7 +1003,10 @@ def load_map(map_data):
     doors = pygame.sprite.Group()
     keys = pygame.sprite.Group()
     enemies = pygame.sprite.Group()
+    bosses = pygame.sprite.Group()
     power_ups = pygame.sprite.Group()
+    particle_group.empty() # Clear particles on new level
+    footstep_group.empty() # Clear footsteps on new level
     active_dialogue = None
     
     # Reset visited tiles for the new map
@@ -820,14 +1015,17 @@ def load_map(map_data):
     # Populate walls from map layout
     for row_idx, row in enumerate(map_data["layout"]):
         for col_idx, cell in enumerate(row):
-            x = col_idx * TILE_SIZE
-            y = row_idx * TILE_SIZE
             if cell == 1:
-                # To fill the whole screen, we draw the last row of tiles at the bottom edge.
+                x = col_idx * TILE_SIZE
+                y = row_idx * TILE_SIZE
+                rect_height = TILE_SIZE
+                # For the last row, stretch the wall's height to fill the remaining screen space.
+                # This prevents a gap from forming between the dungeon and the bottom of the screen.
                 if row_idx == len(map_data["layout"]) - 1:
-                    y = SCREEN_HEIGHT - TILE_SIZE
-                wall_rect = pygame.Rect(x, y, TILE_SIZE, TILE_SIZE)
-                walls.append(wall_rect)
+                    rect_height = SCREEN_HEIGHT - y
+                wall_rect = pygame.Rect(x, y, TILE_SIZE, rect_height)
+                # MODIFIED: Walls are now dictionaries with increased health
+                walls.append({'rect': wall_rect, 'health': 5, 'hit_timer': 0})
 
     # Place player at the specified spawn position
     spawn_pos = (map_data["player_spawn_pos"][0] * TILE_SIZE, map_data["player_spawn_pos"][1] * TILE_SIZE)
@@ -849,6 +1047,10 @@ def load_map(map_data):
     for enemy_data in map_data["enemies"]:
         enemies.add(Enemy(enemy_data["pos"][0] * TILE_SIZE, enemy_data["pos"][1] * TILE_SIZE, enemy_data["patrol_range"], enemy_data["speed"]))
 
+    # Create bosses from map data
+    for boss_data in map_data.get("bosses", []):
+        bosses.add(Boss(boss_data["pos"][0] * TILE_SIZE, boss_data["pos"][1] * TILE_SIZE))
+
     # Create torches from map data
     for torch_data in map_data["torches"]:
         torches.add(Torch(torch_data["pos"][0] * TILE_SIZE + TILE_SIZE // 2, torch_data["pos"][1] * TILE_SIZE + TILE_SIZE // 2))
@@ -859,7 +1061,20 @@ def load_map(map_data):
     
     # Create doors from map data
     for door_data in map_data["doors"]:
-        doors.add(Door(door_data["pos"][0] * TILE_SIZE, door_data["pos"][1] * TILE_SIZE, door_data["locked"]))
+        door_x = door_data["pos"][0] * TILE_SIZE
+        door_y = door_data["pos"][1] * TILE_SIZE
+        
+        # Create a door instance with default size
+        new_door = Door(door_x, door_y, door_data["locked"])
+
+        # If the door is on the last row, stretch its height to match the walls
+        if door_data["pos"][1] == len(map_data["layout"]) - 1:
+            door_height = SCREEN_HEIGHT - door_y
+            new_door.image = pygame.Surface((TILE_SIZE, door_height))
+            new_door.image.fill(DOOR_COLOR)
+            new_door.rect = new_door.image.get_rect(topleft=(door_x, door_y))
+        
+        doors.add(new_door)
 
     # Create power-ups from map data
     for pu_data in map_data["power_ups"]:
@@ -876,8 +1091,11 @@ def load_map(map_data):
 
 # Initial map load
 current_dungeon_data = generate_dungeon(current_level)
-# Add the 'player' variable initialization here.
+# Add the 'player' and other group variable initializations here.
 player = None
+particle_group = pygame.sprite.Group()
+footstep_group = pygame.sprite.Group()
+bosses = pygame.sprite.Group()
 load_map(current_dungeon_data)
 
 # --- Leaderboard Data ---
@@ -898,12 +1116,15 @@ def get_key_name(key_code):
     """Converts a pygame key code to a readable string."""
     return pygame.key.name(key_code).upper()
 
-def draw_menu():
+def draw_menu(menu_entities_group):
     """Draws the main menu screen."""
     screen.fill(BLACK)
     
+    # NEW: Draw the floating menu entities for ambience
+    menu_entities_group.draw(screen)
+    
     # Title text
-    title_text = font.render("A Hero's Journey", True, WHITE)
+    title_text = font.render("Ghost Maze: A Hero's Journey", True, WHITE)
     title_rect = title_text.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 4))
     screen.blit(title_text, title_rect)
     
@@ -1236,23 +1457,32 @@ def draw_game():
     """Draws the main game screen with dungeon, player, and NPCs."""
     # Draw the dungeon floor
     draw_floor()
+
+    # NEW: Draw the footsteps
+    footstep_group.draw(screen)
     
     # Draw the dungeon walls
-    for wall in walls:
-        pygame.draw.rect(screen, WALL_COLOR, wall)
+    for wall_dict in walls:
+        # If the wall was recently hit, make it flash white
+        color = ENEMY_HIT_COLOR if wall_dict['hit_timer'] > 0 else WALL_COLOR
+        pygame.draw.rect(screen, color, wall_dict['rect'])
 
     # Draw the doors, keys, and enemies
     doors.draw(screen)
     keys.draw(screen)
     enemies.draw(screen)
+    bosses.draw(screen)
     power_ups.draw(screen)
 
     # Draw the player and NPCs
     npcs.draw(screen)
     screen.blit(player.image, player.rect)
-    # NEW: Draw the sword
-    screen.blit(player.sword.image, player.sword.rect)
+    # NEW: Draw the hammer
+    screen.blit(player.hammer.image, player.hammer.rect)
     
+    # NEW: Draw particles
+    particle_group.draw(screen)
+
     # --- Optimized Lighting Effect ---
     # Create a light mask with a transparent background
     light_mask = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
@@ -1406,11 +1636,31 @@ def draw_dialogue(text):
 
 # --- Main Game Loop ---
 def main():
-    global current_state, active_dialogue, current_map_key, walls, npcs, torches, doors, player, keys, enemies, current_level, current_dungeon_data, power_ups, visited_tiles, rebind_target, KEY_BINDINGS, music_volume, is_muted, player_score, player_level, score_at_last_level_up, leaderboard
+    global current_state, active_dialogue, current_map_key, walls, npcs, torches, doors, player, keys, enemies, bosses, current_level, current_dungeon_data, power_ups, visited_tiles, rebind_target, KEY_BINDINGS, music_volume, is_muted, player_score, player_level, score_at_last_level_up, leaderboard, particle_group, footstep_group
+    
+    # --- NEW: Menu Animation Entities ---
+    menu_entities = pygame.sprite.Group()
+    # Create a few enemies
+    for _ in range(3):
+        # Spawn them at random heights, off-screen to the left or right
+        start_x = random.choice([-200, SCREEN_WIDTH + 200])
+        enemy = Enemy(start_x, random.randint(0, SCREEN_HEIGHT), 0, 0)
+        # Set a speed. If starting from the right, make it negative.
+        enemy.speed = random.uniform(1.5, 3.5) * (-1 if start_x > SCREEN_WIDTH else 1)
+        menu_entities.add(enemy)
+    # Create a boss
+    boss_start_x = random.choice([-400, SCREEN_WIDTH + 400])
+    boss = Boss(boss_start_x, random.randint(0, SCREEN_HEIGHT))
+    boss.speed = 1.2 * (-1 if boss_start_x > SCREEN_WIDTH else 1) # Boss is slower
+    menu_entities.add(boss)
+
     running = True
     
     # Store the last unmuted volume level
     last_volume = music_volume
+    
+    # Timer for footstep creation
+    footstep_timer = 0
     
     # Define which states are considered 'menu' states
     menu_states = [
@@ -1471,12 +1721,15 @@ def main():
                             current_state = GAME_STATES["STORY"]
                         else:
                             current_state = GAME_STATES["GAME"]
+                        continue
                     elif options_button_rect.collidepoint(mouse_pos):
                         print("Opening options menu...")
                         current_state = GAME_STATES["OPTIONS"]
+                        continue
                     elif leaderboard_button_rect.collidepoint(mouse_pos):
                         print("Opening leaderboard...")
                         current_state = GAME_STATES["LEADERBOARD"]
+                        continue
                     elif quit_button_rect.collidepoint(mouse_pos):
                         running = False
                 elif current_state == GAME_STATES["OPTIONS"]:
@@ -1491,10 +1744,13 @@ def main():
                     
                     if audio_button_rect.collidepoint(mouse_pos):
                         current_state = GAME_STATES["AUDIO_OPTIONS"]
+                        continue
                     elif controls_button_rect.collidepoint(mouse_pos):
                         current_state = GAME_STATES["CONTROLS_OPTIONS"]
+                        continue
                     elif back_button_rect.collidepoint(mouse_pos):
                         current_state = GAME_STATES["MENU"]
+                        continue
                 elif current_state == GAME_STATES["AUDIO_OPTIONS"]:
                     back_text_rect = small_font.render("Back", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 100))
                     back_button_rect = back_text_rect.inflate(20, 10)
@@ -1528,6 +1784,7 @@ def main():
                             pygame.mixer.Channel(0).set_volume(last_volume) # Also unmute the footstep channel
                     elif back_button_rect.collidepoint(mouse_pos):
                         current_state = GAME_STATES["OPTIONS"]
+                        continue
                 elif current_state == GAME_STATES["CONTROLS_OPTIONS"]:
                     back_text_rect = small_font.render("Back", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 200))
                     
@@ -1535,22 +1792,28 @@ def main():
                     key_y_start = SCREEN_HEIGHT / 2 - 100
                     button_x_start = SCREEN_WIDTH / 2 + 50
                     
+                    rebinding_clicked = False
                     for i, (action, key_code) in enumerate(KEY_BINDINGS.items()):
                         key_rect = small_font.render(get_key_name(key_code), True, WHITE).get_rect(left=button_x_start, centery=key_y_start + i * 50)
                         key_button_rect = key_rect.inflate(20, 10)
                         if key_button_rect.collidepoint(mouse_pos):
                             rebind_target = action
                             current_state = GAME_STATES["REBINDING_KEY"]
+                            rebinding_clicked = True
                             break
+                    if rebinding_clicked:
+                        continue
 
                     back_button_rect = back_text_rect.inflate(20, 10)
                     if back_button_rect.collidepoint(mouse_pos):
                         current_state = GAME_STATES["OPTIONS"]
+                        continue
                 elif current_state == GAME_STATES["LEADERBOARD"]:
                     back_text_rect = small_font.render("Back", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT - 50))
                     back_button_rect = back_text_rect.inflate(20, 10)
                     if back_button_rect.collidepoint(mouse_pos):
                         current_state = GAME_STATES["MENU"]
+                        continue
                 elif current_state == GAME_STATES["PAUSED"]:
                     resume_text_rect = small_font.render("Resume", True, WHITE).get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2))
                     resume_button_rect = resume_text_rect.inflate(20, 10)
@@ -1560,6 +1823,7 @@ def main():
                     
                     if resume_button_rect.collidepoint(mouse_pos):
                         current_state = GAME_STATES["GAME"]
+                        continue
                     elif exit_button_rect.collidepoint(mouse_pos):
                         # Reset all game state variables
                         current_level = 1
@@ -1573,6 +1837,7 @@ def main():
                         load_map(current_dungeon_data)
                         
                         current_state = GAME_STATES["MENU"]
+                        continue
 
             elif event.type == pygame.KEYDOWN:
                 if current_state == GAME_STATES["REBINDING_KEY"]:
@@ -1581,19 +1846,24 @@ def main():
                         KEY_BINDINGS[rebind_target] = event.key
                         rebind_target = None
                         current_state = GAME_STATES["CONTROLS_OPTIONS"]
+                        continue
                 elif event.key == pygame.K_ESCAPE:
                     if current_state == GAME_STATES["GAME"]:
                         current_state = GAME_STATES["PAUSED"]
+                        continue
                     elif current_state == GAME_STATES["PAUSED"]:
                         current_state = GAME_STATES["GAME"]
+                        continue
                     elif current_state == GAME_STATES["GAME_OVER"]:
                         running = False
                 elif current_state == GAME_STATES["STORY"]:
                     current_state = GAME_STATES["GAME"]
+                    continue
                 elif current_state == GAME_STATES["DIALOGUE"]:
                     # Press any key to exit dialogue
                     active_dialogue = None
                     current_state = GAME_STATES["GAME"]
+                    continue
                 elif current_state == GAME_STATES["GAME_OVER"]:
                     if event.key == pygame.K_r:
                         # Restart the game from level 1
@@ -1605,10 +1875,11 @@ def main():
                         current_dungeon_data = generate_dungeon(current_level)
                         load_map(current_dungeon_data)
                         current_state = GAME_STATES["MENU"]
+                        continue
                 elif current_state == GAME_STATES["GAME"]:
                     if event.key == KEY_BINDINGS["interact"]:
-                        # Swing sword is an independent combat action.
-                        player.sword.swing()
+                        # Swing hammer is an independent combat action.
+                        player.hammer.swing()
                         
                         # Create an interaction rect for non-combat interactions.
                         interaction_rect = player.rect.inflate(TILE_SIZE // 2, TILE_SIZE // 2)
@@ -1634,9 +1905,11 @@ def main():
                         # 1. NPC interaction has the highest priority.
                         if collided_npc:
                             player.life_points = min(player.max_life_points, player.life_points + 20)
+                            create_particles(player.rect.centerx, player.rect.centery, HEAL_COLOR, 15, 'healing')
                             active_dialogue = f"{collided_npc.dialogue} You feel better. HP is now {player.life_points}/{player.max_life_points}."
                             current_state = GAME_STATES["DIALOGUE"]
                             play_sound(dialogue_sound)
+                            continue
                         
                         # 2. Key collection is next. This ensures the key is in the player's
                         # possession before any door interaction can be attempted on a later key press.
@@ -1647,15 +1920,19 @@ def main():
                             active_dialogue = "You found a key! It might open something."
                             current_state = GAME_STATES["DIALOGUE"]
                             play_sound(collect_sound)
+                            continue
 
                         # 3. Power-up collection follows.
                         elif power_up_to_collect:
                             if power_up_to_collect.type == "heal":
                                 player.life_points = min(player.max_life_points, player.life_points + 50)
+                                create_particles(player.rect.centerx, player.rect.centery, HEAL_COLOR, 15, 'healing')
                                 player_score += 50
                                 active_dialogue = f"You used a healing potion! HP restored to {player.life_points}/{player.max_life_points}."
                             elif power_up_to_collect.type == "enemy_bomb":
                                 player_score += 75
+                                for enemy in enemies:
+                                    create_particles(enemy.rect.centerx, enemy.rect.centery, ENEMY_COLOR, 30, 'explosion')
                                 enemies.empty()
                                 active_dialogue = "All enemies have been vanquished!"
                             elif power_up_to_collect.type == "fog_clear":
@@ -1668,9 +1945,11 @@ def main():
                             power_ups.remove(power_up_to_collect)
                             current_state = GAME_STATES["DIALOGUE"]
                             play_sound(collect_sound)
+                            continue
 
                         # 4. Door interaction is the last resort.
                         else:
+                            door_interacted = False
                             for door in doors:
                                 # Check for collision with a locked door.
                                 if door.locked and interaction_rect.colliderect(door.rect):
@@ -1684,7 +1963,10 @@ def main():
                                         active_dialogue = "The door is locked. You need a key."
                                         current_state = GAME_STATES["DIALOGUE"]
                                     # Only interact with the first door found.
+                                    door_interacted = True
                                     break
+                            if door_interacted:
+                                continue
             
             elif event.type == pygame.KEYUP:
                 if event.key == KEY_BINDINGS["sprint"]:
@@ -1695,7 +1977,19 @@ def main():
                         pygame.mixer.Channel(0).stop()
 
         if current_state == GAME_STATES["MENU"]:
-            draw_menu()
+            # --- NEW: Menu Animation Logic ---
+            for entity in menu_entities:
+                # Move the entity
+                entity.rect.x += entity.speed
+
+                # If entity goes off-screen, reset its position on the opposite side
+                if entity.speed > 0 and entity.rect.left > SCREEN_WIDTH: # Moving right
+                    entity.rect.right = 0
+                    entity.rect.y = random.randint(0, SCREEN_HEIGHT - entity.rect.height)
+                elif entity.speed < 0 and entity.rect.right < 0: # Moving left
+                    entity.rect.left = SCREEN_WIDTH
+                    entity.rect.y = random.randint(0, SCREEN_HEIGHT - entity.rect.height)
+            draw_menu(menu_entities)
         elif current_state == GAME_STATES["OPTIONS"]:
             draw_options_menu()
         elif current_state == GAME_STATES["AUDIO_OPTIONS"]:
@@ -1738,35 +2032,91 @@ def main():
                     if not is_muted:
                         pygame.mixer.Channel(0).set_volume(music_volume)
                         pygame.mixer.Channel(0).play(footstep_sound, -1) # Play on a loop
+                # Create footsteps
+                footstep_timer += 1
+                if footstep_timer > 10:
+                    footstep_group.add(Footstep(player.rect.centerx, player.rect.centery))
+                    footstep_timer = 0
             else:
                 pygame.mixer.Channel(0).stop()
+                footstep_timer = 0 # Reset timer when not moving
 
             player.update(dx, dy, walls, doors)
 
-            # Update enemies and NPCs
-            enemies.update()
+            # Update enemies, NPCs, walls, particles, and footsteps
+            enemies.update(player)
+            bosses.update(player)
             npcs.update()
+            particle_group.update()
+            footstep_group.update()
+            for wall_dict in walls:
+                if wall_dict['hit_timer'] > 0:
+                    wall_dict['hit_timer'] -= 1
 
-            # NEW: Sword attack collision
-            if player.sword.swinging:
-                # Check for collision between the sword and enemies
-                enemies_hit = pygame.sprite.spritecollide(player.sword, enemies, False)
+            # Hammer attack collision
+            if player.hammer.swinging:
+                # Check for collision between the hammer and enemies
+                enemies_hit = pygame.sprite.spritecollide(player.hammer, enemies, False)
                 for enemy in enemies_hit:
                     enemy.take_damage(1)
+                
+                # Check for collision between the hammer and bosses
+                bosses_hit = pygame.sprite.spritecollide(player.hammer, bosses, False)
+                for boss in bosses_hit:
+                    boss.take_damage(1)
 
-            # NEW: Check for dead enemies and remove them
+                # NEW: Check for collision between the hammer and walls
+                for wall_dict in walls[:]: # Iterate a copy for safe removal
+                    if wall_dict['hit_timer'] == 0 and player.hammer.rect.colliderect(wall_dict['rect']):
+                        wall_dict['health'] -= 1
+                        wall_dict['hit_timer'] = player.hammer.swing_duration
+                        
+                        if wall_dict['health'] <= 0:
+                            create_particles(wall_dict['rect'].centerx, wall_dict['rect'].centery, WALL_COLOR, 20, 'explosion')
+                            walls.remove(wall_dict)
+                            player_score += 10 # Small reward
+                            play_sound(wall_destroy_sound) # Play destruction sound
+                        else:
+                            play_sound(enemy_hit_sound) # Play hit sound
+
+            # Check for dead enemies and remove them
             for enemy in list(enemies): # Iterate over a copy to allow removal
                 if enemy.life_points <= 0:
                     player_score += 150 # Award points for defeating an enemy
+                    create_particles(enemy.rect.centerx, enemy.rect.centery, ENEMY_COLOR, 30, 'explosion')
                     enemies.remove(enemy)
 
-            # Check for enemy collision with player
+            # Check for dead bosses
+            for boss in list(bosses):
+                if boss.life_points <= 0:
+                    player_score += 1000
+                    create_particles(boss.rect.centerx, boss.rect.centery, BOSS_COLOR, 100, 'explosion')
+                    
+                    # Spawn a key at the boss's location
+                    keys.add(Key(boss.rect.x, boss.rect.y))
+                    
+                    bosses.remove(boss)
+                    # The door is no longer automatically unlocked. The player must collect the key.
+
+            # Check for enemy/boss collision with player
             if player.invulnerable_timer == 0:
+                collided_with = None
+                damage_to_take = 0
+
                 enemy_collision = pygame.sprite.spritecollideany(player, enemies)
                 if enemy_collision:
-                    player.life_points -= 20
+                    collided_with = enemy_collision
+                    damage_to_take = BASE_ENEMY_DAMAGE + (player_level * DAMAGE_SCALING_PER_LEVEL)
+                
+                boss_collision = pygame.sprite.spritecollideany(player, bosses)
+                if boss_collision:
+                    collided_with = boss_collision
+                    damage_to_take = boss_collision.damage
+                
+                if collided_with:
+                    player.life_points -= damage_to_take
                     play_sound(damage_sound)
-                    player.invulnerable_timer = 60 # Set a 60-frame invulnerability period
+                    player.invulnerable_timer = 60
                     if player.life_points <= 0:
                         play_sound(game_over_sound)
                         add_to_leaderboard(player_score, player_level)
@@ -1791,6 +2141,8 @@ def main():
                 player.max_stamina += 10 # Increase max stamina
                 player.life_points = player.max_life_points  # Fully heal on level up
                 player.stamina = player.max_stamina # Refill stamina
+                # NEW: Create a cyan particle effect for leveling up
+                create_particles(player.rect.centerx, player.rect.centery, CYAN_COLOR, 25, 'healing')
                 play_sound(level_up_sound)
 
             # Draw everything
